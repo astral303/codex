@@ -1931,7 +1931,8 @@ async fn paginated_fork_survives_post_response_hydration_failure() -> Result<()>
 }
 
 #[tokio::test]
-async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcript() -> Result<()> {
+async fn underfilled_scrollback_coalesces_older_pages_without_opening_the_transcript() -> Result<()>
+{
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
@@ -2026,7 +2027,7 @@ async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcri
         .await?;
     app.transcript_cells = initial_cells;
     app.scrollback_has_older_history = app_server.has_older_history(thread_id);
-    app.config.terminal_resize_reflow.max_rows = TerminalResizeReflowMaxRows::Limit(32);
+    app.config.terminal_resize_reflow.max_rows = TerminalResizeReflowMaxRows::Limit(10_000);
     let initial_cell_count = app.transcript_cells.len();
     let initial_page_requests = recorded_params(&requests, "thread/items/list").len();
     let mut tui = crate::tui::test_support::make_test_tui()?;
@@ -2077,6 +2078,7 @@ async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcri
 
     let terminal_width = tui.terminal.last_known_screen_size.into();
     app.reflow_transcript_now(&mut tui, terminal_width)?;
+    assert!(!app.transcript_reflow.has_pending_reflow());
     let request = loop {
         match app_event_rx.recv().await {
             Some(event @ AppEvent::RequestOlderScrollbackHistory { .. }) => break event,
@@ -2085,26 +2087,56 @@ async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcri
         }
     };
     app.handle_event(&mut tui, &mut app_server, request).await?;
-    let loaded = loop {
-        match app_event_rx.recv().await {
-            Some(event @ AppEvent::OlderThreadHistoryLoaded { .. }) => break event,
-            Some(_) => {}
-            None => panic!("older history page channel closed"),
+
+    let mut intermediate_pages = 0;
+    loop {
+        let loaded = loop {
+            match app_event_rx.recv().await {
+                Some(event @ AppEvent::OlderThreadHistoryLoaded { .. }) => break event,
+                Some(_) => {}
+                None => panic!("older history page channel closed"),
+            }
+        };
+        app.handle_event(&mut tui, &mut app_server, loaded).await?;
+        if !app_server.has_older_history(thread_id) {
+            break;
         }
-    };
-    app.handle_event(&mut tui, &mut app_server, loaded).await?;
+        intermediate_pages += 1;
+        assert!(!app.transcript_reflow.has_pending_reflow());
+    }
 
     assert!(app.overlay.is_none());
     assert!(app.transcript_cells.len() > initial_cell_count);
-    assert_eq!(
-        recorded_params(&requests, "thread/items/list").len(),
-        initial_page_requests + 1
-    );
-    assert_eq!(
-        app.render_transcript_lines_for_reflow(/*width*/ 80)
-            .lines
-            .len(),
-        32
+    let loaded_output_count = app
+        .render_transcript_lines_for_reflow(/*width*/ 80)
+        .lines
+        .iter()
+        .map(rendered_line_text)
+        .filter(|line| line.contains("scrollback output"))
+        .count();
+    app.config.terminal_resize_reflow.max_rows = TerminalResizeReflowMaxRows::Limit(32);
+    let capped_rows = app
+        .render_transcript_lines_for_reflow(/*width*/ 80)
+        .lines
+        .len();
+    assert_eq!(capped_rows, 32);
+    insta::assert_snapshot!(
+        format!(
+            "intermediate pages without repaint: {intermediate_pages}\n\
+             final repaint pending: {}\n\
+             older page requests: {}\n\
+             loaded outputs: {loaded_output_count}\n\
+             capped rows: {capped_rows}",
+            app.transcript_reflow.has_pending_reflow(),
+            recorded_params(&requests, "thread/items/list").len() - initial_page_requests,
+        ),
+        @r"
+    intermediate pages without repaint: 1
+    final repaint pending: true
+    older page requests: 2
+    loaded outputs: 120
+    capped rows: 32
+    "
     );
 
     app_server.shutdown().await?;
