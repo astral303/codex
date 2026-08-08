@@ -66,7 +66,17 @@ impl App {
             app_server.cancel_older_history_page(thread_id);
             return Ok(());
         }
-        let page = result.map_err(|err| color_eyre::eyre::eyre!(err))?;
+        let page = match result {
+            Ok(page) => page,
+            Err(err) => {
+                if self.overlay.is_none() {
+                    // Earlier pages in this refill chain may already be present in transcript
+                    // source while their combined terminal rebuild is deferred.
+                    self.schedule_immediate_resize_reflow(tui);
+                }
+                return Err(color_eyre::eyre::eyre!(err));
+            }
+        };
         let Some(store) = self
             .thread_event_channels
             .get(&thread_id)
@@ -240,12 +250,15 @@ impl App {
                 .render_transcript_lines_for_reflow(wrap_width)
                 .lines
                 .len();
-            self.schedule_immediate_resize_reflow(tui);
+            // Older rows can only be prepended by rebuilding terminal-native scrollback. Finish
+            // the automatic refill chain before scheduling that rebuild so every 100-item page
+            // does not visibly clear and repaint the entire terminal.
             if self.scrollback_history_needs_top_up(rendered_rows)
                 && self.request_older_history_page(app_server, thread_id)
             {
                 return Ok(());
             }
+            self.schedule_immediate_resize_reflow(tui);
         }
         if continue_to_start
             && self.request_older_history_page(app_server, thread_id)
