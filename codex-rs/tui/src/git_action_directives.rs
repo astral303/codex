@@ -62,18 +62,21 @@ pub(crate) fn parse_assistant_markdown(markdown: &str, cwd: &Path) -> ParsedAssi
             visible_lines.push(rewritten.trim_end().to_string());
             continue;
         }
-        let (visible_line, line_actions) = strip_line_directives(line);
-        for action in line_actions {
-            if seen.insert(action.clone()) {
-                git_actions.push(action);
+        if let Some((visible_line, line_actions)) = strip_line_directives_if_present(line) {
+            for action in line_actions {
+                if seen.insert(action.clone()) {
+                    git_actions.push(action);
+                }
             }
+            visible_lines.push(visible_line.trim_end().to_string());
+        } else {
+            visible_lines.push(line.to_string());
         }
-        visible_lines.push(visible_line.trim_end().to_string());
     }
 
     while visible_lines
         .last()
-        .is_some_and(std::string::String::is_empty)
+        .is_some_and(|line| line.trim().is_empty())
     {
         visible_lines.pop();
     }
@@ -132,20 +135,25 @@ fn rewrite_code_comment_line(line: &str, cwd: &Path) -> Option<String> {
 }
 
 pub(crate) fn strip_line_directives(line: &str) -> (String, Vec<GitActionDirective>) {
+    strip_line_directives_if_present(line).unwrap_or_else(|| (line.to_string(), Vec::new()))
+}
+
+fn strip_line_directives_if_present(line: &str) -> Option<(String, Vec<GitActionDirective>)> {
     let mut visible = String::new();
     let mut actions = Vec::new();
     let mut remaining = line;
+    let mut removed_directive = false;
 
     while let Some(start) = remaining.find("::git-") {
         visible.push_str(&remaining[..start]);
         let directive = &remaining[start + 2..];
         let Some(open_brace) = directive.find('{') else {
             visible.push_str(&remaining[start..]);
-            return (visible, actions);
+            return removed_directive.then_some((visible, actions));
         };
         let Some(close_brace) = directive[open_brace + 1..].find('}') else {
             visible.push_str(&remaining[start..]);
-            return (visible, actions);
+            return removed_directive.then_some((visible, actions));
         };
         let close_brace = open_brace + 1 + close_brace;
         let name = &directive[..open_brace];
@@ -153,10 +161,11 @@ pub(crate) fn strip_line_directives(line: &str) -> (String, Vec<GitActionDirecti
         if let Some(action) = parse_git_action(name, attributes) {
             actions.push(action);
         }
+        removed_directive = true;
         remaining = &directive[close_brace + 1..];
     }
     visible.push_str(remaining);
-    (visible, actions)
+    removed_directive.then_some((visible, actions))
 }
 
 fn directive_integer(attributes: &HashMap<String, String>, name: &str) -> Option<i64> {
@@ -326,6 +335,15 @@ mod tests {
         let parsed = parse_assistant_markdown(markdown, Path::new("/repo"));
 
         assert_eq!(parsed.visible_markdown, markdown);
+    }
+
+    #[test]
+    fn preserves_markdown_hard_break_spaces_on_ordinary_lines() {
+        let markdown = "first line  \nsecond line";
+        let parsed = parse_assistant_markdown(markdown, Path::new("/repo"));
+
+        assert_eq!(parsed.visible_markdown, markdown);
+        assert!(parsed.git_actions.is_empty());
     }
 
     #[test]
