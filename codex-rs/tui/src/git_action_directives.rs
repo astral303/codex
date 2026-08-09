@@ -60,19 +60,23 @@ pub(crate) fn parse_assistant_markdown(markdown: &str, cwd: &Path) -> ParsedAssi
     let mut visible_lines = Vec::new();
 
     for line in markdown.lines() {
-        let (visible_line, line_actions) =
-            rewrite_code_comment_line(line, cwd).unwrap_or_else(|| strip_line_directives(line));
-        for action in line_actions {
-            if seen.insert(action.clone()) {
-                git_actions.push(action);
+        if let Some((visible_line, line_actions)) =
+            rewrite_code_comment_line(line, cwd).or_else(|| strip_line_directives_if_present(line))
+        {
+            for action in line_actions {
+                if seen.insert(action.clone()) {
+                    git_actions.push(action);
+                }
             }
+            visible_lines.push(visible_line.trim_end().to_string());
+        } else {
+            visible_lines.push(line.to_string());
         }
-        visible_lines.push(visible_line.trim_end().to_string());
     }
 
     while visible_lines
         .last()
-        .is_some_and(std::string::String::is_empty)
+        .is_some_and(|line| line.trim().is_empty())
     {
         visible_lines.pop();
     }
@@ -130,9 +134,14 @@ fn rewrite_code_comment_line(line: &str, cwd: &Path) -> Option<(String, Vec<GitA
 }
 
 pub(crate) fn strip_line_directives(line: &str) -> (String, Vec<GitActionDirective>) {
+    strip_line_directives_if_present(line).unwrap_or_else(|| (line.to_string(), Vec::new()))
+}
+
+fn strip_line_directives_if_present(line: &str) -> Option<(String, Vec<GitActionDirective>)> {
     let mut visible = String::new();
     let mut actions = Vec::new();
     let mut remaining = line;
+    let mut removed_directive = false;
 
     while let Some(start) = remaining.find("::git-") {
         visible.push_str(&remaining[..start]);
@@ -148,11 +157,12 @@ pub(crate) fn strip_line_directives(line: &str) -> (String, Vec<GitActionDirecti
             remaining = suffix;
         } else {
             visible.push_str(source);
-            return (visible, actions);
+            return removed_directive.then_some((visible, actions));
         }
+        removed_directive = true;
     }
     visible.push_str(remaining);
-    (visible, actions)
+    removed_directive.then_some((visible, actions))
 }
 
 fn directive_integer(directive: &AssistantDirective<'_>, name: &str) -> Option<i64> {
@@ -288,6 +298,15 @@ mod tests {
         let parsed = parse_assistant_markdown(markdown, Path::new("/repo"));
 
         assert_eq!(parsed.visible_markdown, markdown);
+    }
+
+    #[test]
+    fn preserves_markdown_hard_break_spaces_on_ordinary_lines() {
+        let markdown = "first line  \nsecond line";
+        let parsed = parse_assistant_markdown(markdown, Path::new("/repo"));
+
+        assert_eq!(parsed.visible_markdown, markdown);
+        assert!(parsed.git_actions.is_empty());
     }
 
     #[test]
