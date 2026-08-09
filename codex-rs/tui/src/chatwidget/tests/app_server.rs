@@ -1238,6 +1238,60 @@ async fn live_app_server_turn_completion_repairs_dropped_message_deltas() {
 }
 
 #[tokio::test]
+async fn live_app_server_turn_completion_preserves_hard_break_without_required_reflow() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let hard_break = "> First line.  \n> Second line.";
+
+    handle_turn_started(&mut chat, "turn-1");
+    while rx.try_recv().is_ok() {}
+    handle_agent_message_delta(&mut chat, format!("{hard_break}\n"));
+    chat.run_commit_tick();
+    while rx.try_recv().is_ok() {}
+
+    let mut completed_turn = app_server_turn(
+        "turn-1",
+        AppServerTurnStatus::Completed,
+        Some(1_000),
+        /*error*/ None,
+    );
+    completed_turn.items_view = codex_app_server_protocol::TurnItemsView::Summary;
+    completed_turn.items = vec![AppServerThreadItem::AgentMessage {
+        id: "msg-1".to_string(),
+        text: hard_break.to_string(),
+        phase: Some(MessagePhase::FinalAnswer),
+        memory_citation: None,
+    }];
+    chat.handle_server_notification(
+        ServerNotification::TurnCompleted(TurnCompletedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: completed_turn,
+        }),
+        /*replay_kind*/ None,
+    );
+
+    let consolidations = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::ConsolidateAgentMessage {
+                source,
+                scrollback_reflow,
+                deferred_history_cell,
+                ..
+            } => {
+                assert_eq!(source, hard_break);
+                assert_eq!(
+                    scrollback_reflow,
+                    crate::app_event::ConsolidationScrollbackReflow::IfResizeReflowRan
+                );
+                assert!(deferred_history_cell.is_none());
+                Some(())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(consolidations.len(), 1);
+}
+
+#[tokio::test]
 async fn live_app_server_stream_recovery_restores_previous_status_header() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
