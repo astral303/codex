@@ -5,3 +5,6 @@ mod resize_reflow;
 mod status_indicator;
 mod vt100_history;
 mod vt100_live_commit;
+#[cfg(windows)]
+#[path = "windows_terminal_reflow_tests.rs"]
+mod windows_terminal_reflow;
