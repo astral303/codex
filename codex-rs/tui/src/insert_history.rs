@@ -3,6 +3,18 @@
 //! Codex uses the terminal scrollback itself for finalized chat history, so inserting a history
 //! cell is an escape-sequence operation rather than a normal ratatui render.
 
+#[cfg(any(windows, test))]
+mod inline_history;
+
+#[cfg(any(windows, test))]
+pub(crate) use inline_history::InlineHistoryPlacement;
+#[cfg(any(windows, test))]
+pub(crate) use inline_history::append_history_hyperlink_lines_at_placement;
+#[cfg(any(windows, test))]
+pub(crate) use inline_history::record_inline_history_terminal_scroll;
+#[cfg(any(windows, test))]
+pub(crate) use inline_history::sync_terminal_visible_history_rows;
+
 use std::fmt;
 use std::io;
 use std::io::Write;
@@ -54,6 +66,7 @@ pub enum HistoryLineWrapPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InsertHistoryMode {
     Standard,
+    StandardAtHistoryBoundary { history_bottom: u16 },
     ZellijRaw,
 }
 
@@ -162,9 +175,9 @@ where
                 should_update_area = true;
             }
         }
-        InsertHistoryMode::Standard => {
+        InsertHistoryMode::Standard | InsertHistoryMode::StandardAtHistoryBoundary { .. } => {
             let writer = terminal.backend_mut();
-            let cursor_top = if area.bottom() < screen_size.height {
+            let default_cursor_top = if area.bottom() < screen_size.height {
                 // If the viewport is not at the bottom of the screen, scroll it down to make room.
                 // Don't scroll it past the bottom of the screen.
                 let scroll_amount = wrapped_lines.min(screen_size.height - area.bottom());
@@ -183,6 +196,12 @@ where
                 cursor_top
             } else {
                 area.top().saturating_sub(1)
+            };
+            let cursor_top = match mode {
+                InsertHistoryMode::StandardAtHistoryBoundary { history_bottom } => {
+                    history_bottom.saturating_sub(1)
+                }
+                InsertHistoryMode::Standard | InsertHistoryMode::ZellijRaw => default_cursor_top,
             };
 
             // Limit the scroll region to the lines from the top of the screen to the

@@ -20,6 +20,7 @@ use ratatui::layout::Size;
 /// - getting the cursor position
 pub struct VT100Backend {
     crossterm_backend: CrosstermBackend<vt100::Parser>,
+    written: Vec<u8>,
     append_lines_calls: Vec<u16>,
 }
 
@@ -37,6 +38,7 @@ impl VT100Backend {
                 width,
                 scrollback_len,
             )),
+            written: Vec::new(),
             append_lines_calls: Vec::new(),
         }
     }
@@ -48,11 +50,21 @@ impl VT100Backend {
     pub fn append_lines_calls(&self) -> &[u16] {
         &self.append_lines_calls
     }
+
+    pub fn clear_written(&mut self) {
+        self.written.clear();
+    }
+
+    pub fn written(&self) -> &[u8] {
+        &self.written
+    }
 }
 
 impl Write for VT100Backend {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.crossterm_backend.writer_mut().write(buf)
+        let written = self.crossterm_backend.writer_mut().write(buf)?;
+        self.written.extend_from_slice(&buf[..written]);
+        Ok(written)
     }
 
     fn flush(&mut self) -> io::Result<()> {

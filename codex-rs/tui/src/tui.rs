@@ -884,8 +884,10 @@ impl Tui {
         self.frame_requester().schedule_frame();
     }
 
-    pub fn clear_pending_history_lines(&mut self) {
+    /// Discard queued history and its placement state.
+    pub fn reset_history_insertion_state(&mut self) {
         self.pending_history_lines.clear();
+        self.inline_viewport.reset();
     }
 
     /// Write any buffered history lines above the viewport and clear the buffer.
@@ -893,6 +895,7 @@ impl Tui {
         terminal: &mut Terminal,
         pending_history_lines: &mut Vec<PendingHistoryLines>,
         is_zellij: bool,
+        inline_viewport: &mut InlineViewportState,
     ) -> Result<()> {
         if pending_history_lines.is_empty() {
             return Ok(());
@@ -904,6 +907,14 @@ impl Tui {
             } else {
                 InsertHistoryMode::Standard
             };
+            if mode == InsertHistoryMode::Standard {
+                inline_viewport.append_standard_history(
+                    terminal,
+                    &batch.lines,
+                    batch.wrap_policy,
+                )?;
+                continue;
+            }
             crate::insert_history::insert_history_hyperlink_lines_with_mode_and_wrap_policy(
                 terminal,
                 &batch.lines,
@@ -967,6 +978,7 @@ impl Tui {
                 terminal,
                 &mut self.pending_history_lines,
                 self.is_zellij,
+                &mut self.inline_viewport,
             )?;
 
             // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
@@ -1072,20 +1084,53 @@ impl Tui {
             }
 
             let terminal = &mut self.terminal;
+            #[cfg(windows)]
+            let requested_top = screen_size
+                .height
+                .saturating_sub(height.min(screen_size.height));
+            #[cfg(windows)]
+            let flush_before_viewport_update = self
+                .inline_viewport
+                .pending_history_precedes_resize(requested_top, terminal.viewport_area.top());
+            #[cfg(not(windows))]
+            let flush_before_viewport_update = false;
+            #[cfg(windows)]
+            let history_will_be_flushed = !self.pending_history_lines.is_empty();
+            #[cfg(not(windows))]
+            let history_will_be_flushed = false;
+
+            // A zero- or one-row history region cannot isolate raw history writes from the
+            // viewport, so replayed rows can leave stale cells inside the composer.
+            let mut history_can_overlap_viewport = false;
+            if flush_before_viewport_update {
+                history_can_overlap_viewport =
+                    !self.pending_history_lines.is_empty() && terminal.viewport_area.top() <= 1;
+                Self::flush_pending_history_lines(
+                    terminal,
+                    &mut self.pending_history_lines,
+                    self.is_zellij,
+                    &mut self.inline_viewport,
+                )?;
+            }
+
             let needs_full_repaint =
                 self.inline_viewport
                     .update_for_resize_reflow(terminal, height, screen_size)?;
-            // A zero- or one-row history region cannot isolate raw history writes from the
-            // viewport, so replayed rows can leave stale cells inside the composer.
-            let history_can_overlap_viewport =
+
+            history_can_overlap_viewport |=
                 !self.pending_history_lines.is_empty() && terminal.viewport_area.top() <= 1;
             Self::flush_pending_history_lines(
                 terminal,
                 &mut self.pending_history_lines,
                 self.is_zellij,
+                &mut self.inline_viewport,
             )?;
 
-            if needs_full_repaint || history_can_overlap_viewport {
+            if history_will_be_flushed {
+                // Raw history writes can bypass ratatui's diff state. Clear only the final
+                // viewport so the next draw replaces stale cells without touching history above.
+                terminal.clear()?;
+            } else if needs_full_repaint || history_can_overlap_viewport {
                 terminal.invalidate_viewport();
             }
 

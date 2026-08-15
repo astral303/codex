@@ -551,6 +551,15 @@ where
             .min(self.viewport_area.top());
     }
 
+    #[cfg(any(windows, test))]
+    pub(crate) fn visible_history_rows(&self) -> u16 {
+        self.visible_history_rows
+    }
+
+    pub(crate) fn set_visible_history_rows(&mut self, visible_rows: u16) {
+        self.visible_history_rows = visible_rows.min(self.viewport_area.top());
+    }
+
     /// Clears the inactive buffer and swaps it with the current buffer
     pub fn swap_buffers(&mut self) {
         self.previous_buffer_mut().reset();
@@ -579,7 +588,7 @@ fn diff_buffers(a: &Buffer, b: &Buffer) -> Vec<DrawCommand> {
     let next_buffer = &b.content;
 
     let mut updates = vec![];
-    let mut last_nonblank_columns = vec![0; a.area.height as usize];
+    let mut last_nonblank_columns = vec![None; a.area.height as usize];
     for y in 0..a.area.height {
         let row_start = y as usize * a.area.width as usize;
         let row_end = row_start + a.area.width as usize;
@@ -591,23 +600,24 @@ fn diff_buffers(a: &Buffer, b: &Buffer) -> Vec<DrawCommand> {
         // Multi-width glyphs extend that region through their full displayed width.
         // After that point the rest of the row can be cleared with a single ClearToEnd, a perf win
         // versus emitting multiple space Put commands.
-        let mut last_nonblank_column = 0usize;
+        let mut last_nonblank_column = None;
         let mut column = 0usize;
         while column < row.len() {
             let cell = &row[column];
             let width = usize::from(cell.cell_width());
             if cell.symbol() != " " || cell.bg != bg || cell.modifier != Modifier::empty() {
-                last_nonblank_column = column + (width.saturating_sub(1));
+                last_nonblank_column = Some(column + width.saturating_sub(1));
             }
             column += width.max(1); // treat zero-width symbols as width 1
         }
 
-        if last_nonblank_column + 1 < row.len() {
-            let (x, y) = a.pos_of(row_start + last_nonblank_column + 1);
+        let clear_from = last_nonblank_column.map_or(0, |column| column + 1);
+        if clear_from < row.len() {
+            let (x, y) = a.pos_of(row_start + clear_from);
             updates.push(DrawCommand::ClearToEnd { x, y, bg });
         }
 
-        last_nonblank_columns[y as usize] = last_nonblank_column as u16;
+        last_nonblank_columns[y as usize] = last_nonblank_column.map(|column| column as u16);
     }
 
     let mut cell_updates = a.diff_iter(b).collect::<Vec<_>>();
@@ -649,7 +659,7 @@ fn diff_buffers(a: &Buffer, b: &Buffer) -> Vec<DrawCommand> {
 
     for (x, y, cell) in cell_updates {
         let row = usize::from(y - a.area.y);
-        if x <= last_nonblank_columns[row] {
+        if last_nonblank_columns[row].is_some_and(|last_nonblank| x <= last_nonblank) {
             updates.push(DrawCommand::Put {
                 x,
                 y,
@@ -1076,6 +1086,29 @@ mod tests {
                 .iter()
                 .any(|command| matches!(command, DrawCommand::ClearToEnd { x: 2, y: 0, .. })),
             "expected clear-to-end to start after the remaining wide char; commands: {commands:?}"
+        );
+    }
+
+    #[test]
+    fn diff_buffers_clears_blank_row_from_first_column() {
+        let area = Rect::new(0, 0, 10, 1);
+        let mut previous = Buffer::empty(area);
+        let next = Buffer::empty(area);
+
+        previous.set_string(0, 0, "› stale", Style::default());
+
+        let commands = diff_buffers(&previous, &next);
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, DrawCommand::ClearToEnd { x: 0, y: 0, .. })),
+            "expected the blank row to clear the stale first cell; commands: {commands:?}"
+        );
+        assert!(
+            commands
+                .iter()
+                .all(|command| !matches!(command, DrawCommand::Put { y: 0, .. })),
+            "expected the whole row clear to replace individual cell writes; commands: {commands:?}"
         );
     }
 

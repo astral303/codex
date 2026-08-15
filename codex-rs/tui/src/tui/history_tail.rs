@@ -31,7 +31,9 @@ impl Tui {
             &mut self.terminal,
             &mut self.pending_history_lines,
             self.is_zellij,
+            &mut self.inline_viewport,
         )?;
+        self.inline_viewport.reset();
         let mode = if self.is_zellij && wrap_policy == HistoryLineWrapPolicy::Terminal {
             InsertHistoryMode::ZellijRaw
         } else {

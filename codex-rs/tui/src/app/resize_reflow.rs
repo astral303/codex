@@ -403,7 +403,7 @@ impl App {
             // Resize-sensitive history inserts queued before this frame may be wrapped for the old
             // viewport or targeted at rows no longer visible. Drop them and let resize reflow
             // rebuild from transcript cells.
-            tui.clear_pending_history_lines();
+            tui.reset_history_insertion_state();
         }
         self.maybe_run_resize_reflow(tui, size)?;
         Ok(())
@@ -466,7 +466,7 @@ impl App {
         let width = self.chat_widget.history_wrap_width(terminal_width.0);
         if self.transcript_cells.is_empty() {
             // Drop any queued pre-resize/pre-consolidation inserts before rebuilding from cells.
-            tui.clear_pending_history_lines();
+            tui.reset_history_insertion_state();
             self.reset_history_emission_state();
             return Ok(terminal_width);
         }
@@ -476,7 +476,7 @@ impl App {
         let reflowed_rows = reflowed_lines.len();
 
         // Drop any queued pre-resize/pre-consolidation inserts before rebuilding from cells.
-        tui.clear_pending_history_lines();
+        tui.reset_history_insertion_state();
         self.clear_terminal_for_resize_replay(tui)?;
 
         self.deferred_history_lines.clear();
@@ -552,7 +552,7 @@ impl App {
             self.render_transcript_lines_for_reflow(width).lines
         };
 
-        tui.clear_pending_history_lines();
+        tui.reset_history_insertion_state();
         self.clear_terminal_for_resize_replay(tui)?;
 
         self.deferred_history_lines.clear();
