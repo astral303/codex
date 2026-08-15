@@ -292,6 +292,25 @@ where
         draw(&mut self.backend, updates.into_iter())
     }
 
+    /// Paint a standalone buffer without changing the double-buffered viewport state.
+    ///
+    /// This is for source-backed terminal rows outside the viewport. The caller remains
+    /// responsible for restoring the viewport cursor after the paint.
+    pub(crate) fn paint_buffer(&mut self, buffer: &Buffer) -> io::Result<()> {
+        for row in buffer.area.top()..buffer.area.bottom() {
+            queue!(
+                self.backend,
+                MoveTo(/*x*/ 0, row),
+                SetAttribute(crossterm::style::Attribute::Reset),
+                SetForegroundColor(crossterm::style::Color::Reset),
+                SetBackgroundColor(crossterm::style::Color::Reset),
+                Clear(crossterm::terminal::ClearType::CurrentLine),
+            )?;
+        }
+        let blank = Buffer::empty(buffer.area);
+        draw(&mut self.backend, diff_buffers(&blank, buffer).into_iter())
+    }
+
     /// Updates the Terminal so that internal buffers match the requested area.
     ///
     /// Requested area will be saved to remain consistent when rendering. This leads to a full clear

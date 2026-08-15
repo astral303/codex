@@ -1084,20 +1084,10 @@ impl Tui {
             }
 
             let terminal = &mut self.terminal;
-            #[cfg(windows)]
-            let requested_top = screen_size
-                .height
-                .saturating_sub(height.min(screen_size.height));
-            #[cfg(windows)]
             let flush_before_viewport_update = self
                 .inline_viewport
-                .pending_history_precedes_resize(requested_top, terminal.viewport_area.top());
-            #[cfg(not(windows))]
-            let flush_before_viewport_update = false;
-            #[cfg(windows)]
-            let history_will_be_flushed = !self.pending_history_lines.is_empty();
-            #[cfg(not(windows))]
-            let history_will_be_flushed = false;
+                .pending_history_precedes_resize(height, screen_size, terminal.viewport_area.top());
+            let had_pending_history = !self.pending_history_lines.is_empty();
 
             // A zero- or one-row history region cannot isolate raw history writes from the
             // viewport, so replayed rows can leave stale cells inside the composer.
@@ -1126,11 +1116,13 @@ impl Tui {
                 &mut self.inline_viewport,
             )?;
 
-            if history_will_be_flushed {
-                // Raw history writes can bypass ratatui's diff state. Clear only the final
-                // viewport so the next draw replaces stale cells without touching history above.
-                terminal.clear()?;
-            } else if needs_full_repaint || history_can_overlap_viewport {
+            let viewport_was_cleared = if had_pending_history {
+                self.inline_viewport
+                    .clear_viewport_after_history_flush(terminal)?
+            } else {
+                false
+            };
+            if !viewport_was_cleared && (needs_full_repaint || history_can_overlap_viewport) {
                 terminal.invalidate_viewport();
             }
 

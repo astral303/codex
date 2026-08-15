@@ -1,4 +1,4 @@
-//! Platform-specific placement and history insertion for an inline viewport.
+//! Platform-specific source-backed placement and history insertion for an inline viewport.
 
 use std::io;
 use std::io::Write;
@@ -14,7 +14,9 @@ use crate::insert_history::insert_history_hyperlink_lines_with_mode_and_wrap_pol
 #[cfg(any(windows, test))]
 use crate::insert_history::record_inline_history_terminal_scroll;
 #[cfg(any(windows, test))]
-use crate::insert_history::sync_terminal_visible_history_rows;
+use crate::insert_history::repaint_inline_history_tail;
+#[cfg(any(windows, test))]
+use crate::insert_history::update_inline_history_for_viewport;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use ratatui::backend::Backend;
 use ratatui::layout::Position;
@@ -57,14 +59,45 @@ impl InlineViewportState {
         }
     }
 
-    #[cfg(windows)]
     pub(super) fn pending_history_precedes_resize(
         &self,
-        requested_top: u16,
+        viewport_height: u16,
+        screen_size: Size,
         current_top: u16,
     ) -> bool {
-        self.windows
-            .pending_history_precedes_resize(requested_top, current_top)
+        #[cfg(windows)]
+        {
+            let requested_top = screen_size
+                .height
+                .saturating_sub(viewport_height.min(screen_size.height));
+            self.windows
+                .pending_history_precedes_resize(requested_top, current_top)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (viewport_height, screen_size, current_top);
+            false
+        }
+    }
+
+    /// Clear the viewport if this platform's history insertion bypasses ratatui's diff state.
+    pub(super) fn clear_viewport_after_history_flush<B>(
+        &self,
+        terminal: &mut Terminal<B>,
+    ) -> io::Result<bool>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        #[cfg(windows)]
+        {
+            terminal.clear()?;
+            Ok(true)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = terminal;
+            Ok(false)
+        }
     }
 
     /// Resize the inline viewport for transcript reflow.
@@ -106,7 +139,9 @@ impl WindowsInlineViewportState {
         requested_top: u16,
         current_top: u16,
     ) -> bool {
-        self.placement.is_some() && requested_top <= current_top
+        self.placement
+            .as_ref()
+            .is_some_and(|placement| !placement.has_covered_rows() && requested_top <= current_top)
     }
 
     pub(super) fn append_standard_history<B>(
@@ -170,7 +205,10 @@ impl WindowsInlineViewportState {
                 .saturating_sub(placement.viewport_growth_start());
             if area.height > max_safe_height {
                 let missing_rows = area.height - max_safe_height;
-                if area.height < screen_size.height && placement.visible_rows() == 0 {
+                if area.height < screen_size.height
+                    && placement.visible_rows() == 0
+                    && !placement.has_covered_rows()
+                {
                     terminal.backend_mut().set_cursor_position(Position::new(
                         /*x*/ 0,
                         screen_size.height.saturating_sub(1),
@@ -199,6 +237,14 @@ impl WindowsInlineViewportState {
             terminal.clear_after_position(Position::new(/*x*/ 0, clear_y))?;
         }
 
+        let needs_history_repaint = self.placement.as_mut().is_some_and(|placement| {
+            update_inline_history_for_viewport(terminal, placement, area.top())
+        });
+
+        if needs_history_repaint && let Some(placement) = self.placement.as_ref() {
+            repaint_inline_history_tail(terminal, placement)?;
+        }
+
         if self.placement.is_none() {
             let mut placement = InlineHistoryPlacement::new(
                 area.top(),
@@ -207,7 +253,7 @@ impl WindowsInlineViewportState {
             if first_viewport_reservation && previous_area.y <= area.y {
                 placement.allow_viewport_growth_to(previous_area.y);
             }
-            sync_terminal_visible_history_rows(terminal, &placement);
+            update_inline_history_for_viewport(terminal, &mut placement, area.top());
             self.placement = Some(placement);
         }
 

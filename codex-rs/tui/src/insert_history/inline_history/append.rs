@@ -1,9 +1,11 @@
-//! Appends history at an inline placement boundary.
+//! Appends source-backed history at an inline placement boundary.
 
 use std::io;
 use std::io::Write;
 
 use super::InlineHistoryPlacement;
+use super::physical_row_count;
+use super::repaint_inline_history_with_covered_rows;
 use super::sync_terminal_visible_history_rows;
 use crate::custom_terminal::Terminal;
 use crate::insert_history::HistoryLineWrapPolicy;
@@ -45,6 +47,8 @@ where
         return Ok(());
     }
 
+    expose_covered_rows_before_append(terminal, placement)?;
+
     let history_bottom = placement.history_bottom.min(viewport_top);
     let available_rows = viewport_top.saturating_sub(history_bottom);
     if appended_rows > available_rows {
@@ -59,13 +63,18 @@ where
             mode,
             wrap_policy,
         )?;
-        placement.record_scrolling_append(terminal.viewport_area.top(), appended_rows);
+        placement.record_scrolling_append(
+            terminal.viewport_area.top(),
+            appended_rows,
+            &prepared_lines,
+            wrap_width,
+        );
         sync_terminal_visible_history_rows(terminal, placement);
         return Ok(());
     }
 
     paint_history_into_gap(terminal, history_bottom, &prepared_lines, wrap_width)?;
-    placement.record_gap_append(appended_rows);
+    placement.record_gap_append(appended_rows, &prepared_lines, wrap_width);
     sync_terminal_visible_history_rows(terminal, placement);
     Ok(())
 }
@@ -98,12 +107,40 @@ where
     std::io::Write::flush(writer)
 }
 
-fn physical_row_count(line: &HyperlinkLine, wrap_width: usize) -> usize {
-    line.width().max(1).div_ceil(wrap_width)
+fn expose_covered_rows_before_append<B>(
+    terminal: &mut Terminal<B>,
+    placement: &mut InlineHistoryPlacement,
+) -> io::Result<()>
+where
+    B: Backend<Error = io::Error> + Write,
+{
+    let viewport_top = terminal.viewport_area.top();
+    let scroll_rows = placement
+        .history_bottom
+        .saturating_sub(viewport_top)
+        .min(placement.covered_rows);
+    if scroll_rows == 0 {
+        return Ok(());
+    }
+
+    repaint_inline_history_with_covered_rows(terminal, placement, placement.covered_rows)?;
+    let screen_height = terminal.backend().size()?.height;
+    queue!(
+        terminal.backend_mut(),
+        MoveTo(/*x*/ 0, screen_height.saturating_sub(1))
+    )?;
+    terminal.backend_mut().append_lines(scroll_rows)?;
+
+    placement.record_covered_rows_exposed(viewport_top);
+    sync_terminal_visible_history_rows(terminal, placement);
+    terminal.invalidate_viewport();
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::repaint_inline_history_tail;
+    use super::super::update_inline_history_for_viewport;
     use super::*;
     use crate::terminal_hyperlinks::plain_hyperlink_lines;
     use crate::test_backend::VT100Backend;
@@ -180,6 +217,7 @@ mod tests {
         );
         assert_eq!((placement.history_bottom, placement.visible_rows), (7, 7));
         assert_eq!(terminal.visible_history_rows(), 7);
+        assert_eq!(placement.retained_lines, pending);
     }
 
     #[test]
@@ -208,6 +246,52 @@ mod tests {
             ["STATUS", "COMPOSER", "FOOTER"]
         );
         assert_eq!((placement.history_bottom, placement.visible_rows), (5, 5));
+        assert_eq!(terminal.visible_history_rows(), 5);
+    }
+
+    #[test]
+    fn appending_history_exposes_a_covered_tail_through_scrollback() {
+        let mut terminal = terminal(20, 10, Rect::new(/*x*/ 0, /*y*/ 7, 20, /*height*/ 3));
+        let mut placement =
+            InlineHistoryPlacement::new(/*history_bottom*/ 7, /*visible_rows*/ 0);
+        append(
+            &mut terminal,
+            &mut placement,
+            &history(&["HISTORY-1", "HISTORY-2", "HISTORY-3", "HISTORY-4"]),
+        );
+        terminal.set_viewport_area(Rect::new(/*x*/ 0, /*y*/ 5, 20, /*height*/ 5));
+        assert!(update_inline_history_for_viewport(
+            &mut terminal,
+            &mut placement,
+            5
+        ));
+        repaint_inline_history_tail(&mut terminal, &placement).expect("repaint tail");
+
+        append(
+            &mut terminal,
+            &mut placement,
+            &history(&["PENDING-1", "PENDING-2"]),
+        );
+
+        assert_eq!(
+            &screen_rows(&terminal, 20)[..5],
+            [
+                "HISTORY-2",
+                "HISTORY-3",
+                "HISTORY-4",
+                "PENDING-1",
+                "PENDING-2"
+            ]
+        );
+        assert_eq!(terminal.backend().append_lines_calls(), &[2]);
+        assert_eq!(
+            (
+                placement.history_bottom,
+                placement.visible_rows,
+                placement.covered_rows
+            ),
+            (5, 5, 0)
+        );
         assert_eq!(terminal.visible_history_rows(), 5);
     }
 
