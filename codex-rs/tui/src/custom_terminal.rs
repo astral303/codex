@@ -311,6 +311,44 @@ where
         draw(&mut self.backend, diff_buffers(&blank, buffer).into_iter())
     }
 
+    /// Count the leading visually blank rows in the last completed viewport frame.
+    ///
+    /// A row is available for covered history only when every cell is a space with a reset
+    /// background and no modifiers. The count never exceeds `limit`.
+    #[cfg(any(windows, test))]
+    pub(crate) fn rendered_viewport_blank_prefix_rows(&self, limit: u16) -> u16 {
+        let width = usize::from(self.viewport_area.width);
+        if width == 0 {
+            return 0;
+        }
+
+        // Drawing swaps buffers after flushing, so the previous buffer is the completed frame.
+        self.previous_buffer()
+            .content
+            .chunks_exact(width)
+            .take(usize::from(limit))
+            .take_while(|row| {
+                row.iter().all(|cell| {
+                    cell.symbol() == " "
+                        && cell.bg == Color::Reset
+                        && cell.modifier == Modifier::empty()
+                })
+            })
+            .count()
+            .try_into()
+            .unwrap_or(u16::MAX)
+    }
+
+    /// Repaint the last completed viewport frame after raw terminal operations.
+    #[cfg(any(windows, test))]
+    pub(crate) fn repaint_rendered_viewport(&mut self) -> io::Result<()> {
+        let rendered = self.previous_buffer().clone();
+        let cursor = self.last_known_cursor_pos;
+        self.paint_buffer(&rendered)?;
+        queue!(self.backend, MoveTo(cursor.x, cursor.y))?;
+        Backend::flush(&mut self.backend)
+    }
+
     /// Updates the Terminal so that internal buffers match the requested area.
     ///
     /// Requested area will be saved to remain consistent when rendering. This leads to a full clear
@@ -1258,3 +1296,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "custom_terminal_blank_prefix_tests.rs"]
+mod blank_prefix_tests;

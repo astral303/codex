@@ -40,6 +40,7 @@ use ratatui::text::Line;
 use tokio::sync::broadcast;
 use tokio_stream::Stream;
 
+pub(crate) use self::covered_history::CoveredHistoryPolicy;
 pub use self::frame_requester::FrameRequester;
 use self::input_boundary::TerminalInitializationGuard;
 pub(crate) use self::input_boundary::discard_pending_terminal_input;
@@ -62,6 +63,7 @@ use crate::tui::screen_size::ScreenSizePolicy;
 use codex_config::types::NotificationCondition;
 use codex_config::types::NotificationMethod;
 
+mod covered_history;
 mod event_stream;
 mod frame_rate_limiter;
 mod frame_requester;
@@ -1066,6 +1068,7 @@ impl Tui {
         &mut self,
         height: u16,
         screen_size: Size,
+        covered_history_policy: CoveredHistoryPolicy,
         draw_fn: impl FnOnce(&mut custom_terminal::Frame),
     ) -> Result<()> {
         // If we are resuming from ^Z, we need to prepare the resume action now so we can apply it
@@ -1142,7 +1145,11 @@ impl Tui {
 
             terminal.draw_with_size(screen_size, |frame| {
                 draw_fn(frame);
-            })
+            })?;
+
+            self.inline_viewport
+                .reconcile_after_draw(terminal, covered_history_policy)?;
+            Ok(())
         })?
     }
 

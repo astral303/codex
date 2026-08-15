@@ -857,18 +857,28 @@ impl App {
     }
 
     fn render_chat_widget_frame(&mut self, tui: &mut tui::Tui, screen_size: Size) -> Result<Rect> {
+        let covered_history_policy = if self.chat_widget.no_modal_or_popup_active() {
+            tui::CoveredHistoryPolicy::MoveConflictsToScrollback
+        } else {
+            tui::CoveredHistoryPolicy::RestoreAfterViewportShrinks
+        };
         self.with_chat_widget_frame(screen_size.width, |desired_height, chat_widget| {
             let mut rendered_area = Rect::default();
-            tui.draw_with_resize_reflow(desired_height, screen_size, |frame| {
-                let area = frame.area();
-                rendered_area = area;
-                chat_widget.render(area, frame.buffer);
-                self.chat_widget.note_rendered_width(area.width);
-                if let Some((x, y)) = chat_widget.cursor_pos(area) {
-                    frame.set_cursor_style(chat_widget.cursor_style(area));
-                    frame.set_cursor_position((x, y));
-                }
-            })?;
+            tui.draw_with_resize_reflow(
+                desired_height,
+                screen_size,
+                covered_history_policy,
+                |frame| {
+                    let area = frame.area();
+                    rendered_area = area;
+                    chat_widget.render(area, frame.buffer);
+                    self.chat_widget.note_rendered_width(area.width);
+                    if let Some((x, y)) = chat_widget.cursor_pos(area) {
+                        frame.set_cursor_style(chat_widget.cursor_style(area));
+                        frame.set_cursor_position((x, y));
+                    }
+                },
+            )?;
             Ok(rendered_area)
         })
     }

@@ -22,6 +22,10 @@ use ratatui::backend::Backend;
 use ratatui::layout::Position;
 use ratatui::layout::Size;
 
+use super::covered_history::CoveredHistoryPolicy;
+#[cfg(any(windows, test))]
+use super::covered_history::reconcile_after_draw;
+
 #[derive(Debug, Default)]
 pub(super) struct InlineViewportState {
     #[cfg(windows)]
@@ -100,6 +104,25 @@ impl InlineViewportState {
         }
     }
 
+    pub(super) fn reconcile_after_draw<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        policy: CoveredHistoryPolicy,
+    ) -> io::Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        #[cfg(windows)]
+        {
+            self.windows.reconcile_after_draw(terminal, policy)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (terminal, policy);
+            Ok(())
+        }
+    }
+
     /// Resize the inline viewport for transcript reflow.
     pub(super) fn update_for_resize_reflow<B>(
         &mut self,
@@ -163,6 +186,22 @@ impl WindowsInlineViewportState {
                 wrap_policy,
             )
         }
+    }
+
+    pub(super) fn reconcile_after_draw<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        policy: CoveredHistoryPolicy,
+    ) -> io::Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        if let Some(placement) = self.placement.as_mut()
+            && placement.has_covered_rows()
+        {
+            reconcile_after_draw(terminal, placement, policy)?;
+        }
+        Ok(())
     }
 
     pub(super) fn update_for_resize_reflow<B>(

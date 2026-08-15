@@ -15,6 +15,8 @@ pub(crate) use inline_history::record_inline_history_terminal_scroll;
 #[cfg(any(windows, test))]
 pub(crate) use inline_history::repaint_inline_history_tail;
 #[cfg(any(windows, test))]
+pub(crate) use inline_history::repaint_inline_history_with_covered_rows;
+#[cfg(any(windows, test))]
 pub(crate) use inline_history::update_inline_history_for_viewport;
 
 use std::fmt;

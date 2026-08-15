@@ -41,6 +41,7 @@ use crate::render::renderable::RenderableExt;
 use crate::render::renderable::RenderableItem;
 use crate::resume_picker::SessionSelection;
 use crate::tui;
+use crate::tui::CoveredHistoryPolicy;
 use crate::tui::FrameRequester;
 use crate::tui::Tui;
 use crate::tui::TuiEvent;
@@ -375,14 +376,19 @@ impl StartupDraftPump {
         let renderable =
             startup_draft_renderable(&self.header, &self.bottom_pane, self.session_action);
         let desired_height = renderable.desired_height(screen_size.width);
-        tui.draw_with_resize_reflow(desired_height, screen_size, |frame| {
-            let area = frame.area();
-            renderable.render(area, frame.buffer);
-            if let Some((x, y)) = renderable.cursor_pos(area) {
-                frame.set_cursor_style(renderable.cursor_style(area));
-                frame.set_cursor_position((x, y));
-            }
-        })
+        tui.draw_with_resize_reflow(
+            desired_height,
+            screen_size,
+            CoveredHistoryPolicy::MoveConflictsToScrollback,
+            |frame| {
+                let area = frame.area();
+                renderable.render(area, frame.buffer);
+                if let Some((x, y)) = renderable.cursor_pos(area) {
+                    frame.set_cursor_style(renderable.cursor_style(area));
+                    frame.set_cursor_position((x, y));
+                }
+            },
+        )
     }
 }
 

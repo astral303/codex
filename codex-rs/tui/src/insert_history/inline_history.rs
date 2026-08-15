@@ -67,7 +67,6 @@ impl InlineHistoryPlacement {
         self.covered_rows > 0
     }
 
-    #[cfg(test)]
     pub(crate) fn covered_rows(&self) -> u16 {
         self.covered_rows
     }
