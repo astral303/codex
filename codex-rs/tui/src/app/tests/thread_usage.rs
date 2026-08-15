@@ -147,6 +147,52 @@ async fn completed_thread_usage_updates_status_without_scrollback_reflow() -> Re
     Ok(())
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn thread_usage_tail_reflow_restores_source_before_viewport_height_changes() -> Result<()> {
+    let (mut app, mut app_server, mut tui, thread_id, request_id) =
+        app_with_pending_thread_usage().await?;
+    let screen_size = tui.terminal.last_known_screen_size;
+    app.render_chat_widget_frame(&mut tui, screen_size)?;
+
+    // Model placement re-created from the terminal cache without retained source.
+    tui.reset_history_insertion_state();
+    app.render_chat_widget_frame(&mut tui, screen_size)?;
+    assert_eq!(tui.tracked_history_source_for_test(), Some([].as_slice()));
+    app.handle_event(
+        &mut tui,
+        &mut app_server,
+        successful_thread_usage(thread_id, request_id),
+    )
+    .await?;
+    app.render_chat_widget_frame(&mut tui, screen_size)?;
+
+    let mut viewport_heights = vec![tui.terminal.viewport_area.height];
+    for text in ["/", "/m", "/mc", "/mcp", ""] {
+        app.chat_widget.apply_external_edit(text.to_string());
+        app.render_chat_widget_frame(&mut tui, screen_size)?;
+        viewport_heights.push(tui.terminal.viewport_area.height);
+    }
+    assert!(
+        viewport_heights.windows(2).any(|pair| pair[0] != pair[1]),
+        "test setup must exercise a viewport height change: {viewport_heights:?}"
+    );
+
+    let contents = tui
+        .tracked_history_source_for_test()
+        .expect("tracked history source")
+        .iter()
+        .map(|line| line.line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(contents.contains("/status"), "{contents}");
+    assert!(contents.contains("50 credits"), "{contents}");
+    assert!(!contents.contains("Refreshing usage"), "{contents}");
+    assert!(!app.transcript_reflow.has_pending_reflow());
+    app_server.shutdown().await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn thread_usage_after_intervening_history_appends_refreshed_status() -> Result<()> {
     let (mut app, mut app_server, mut tui, thread_id, request_id) =

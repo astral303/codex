@@ -4,6 +4,7 @@
 //! state, and resetting transcript-related app state after `/clear` or Ctrl-L.
 
 use super::*;
+use crate::insert_history::HistoryTailReplacement;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use std::sync::Weak;
 
@@ -159,12 +160,21 @@ impl App {
         }
 
         let wrap_policy = self.history_line_wrap_policy();
-        if !tui.replace_visible_history_tail(
+        match tui.replace_visible_history_tail(
             &rendered_tail.lines[prefix_len..],
             &updated_lines[prefix_len..],
             wrap_policy,
         )? {
-            self.insert_history_cell_lines(tui, status_cell.as_ref(), width);
+            HistoryTailReplacement::Replaced => {}
+            HistoryTailReplacement::NotVisible => {
+                self.insert_history_cell_lines(tui, status_cell.as_ref(), width);
+            }
+            HistoryTailReplacement::RequiresTranscriptReflow => {
+                self.pending_thread_usage_history_refresh = false;
+                let screen_size = tui.terminal.last_known_screen_size;
+                self.reflow_transcript_now(tui, screen_size.into())?;
+                return Ok(());
+            }
         }
         self.last_rendered_history_tail = Some(RenderedHistoryTail {
             cell: Arc::downgrade(&status_cell),

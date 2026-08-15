@@ -3,6 +3,7 @@
 mod append;
 
 pub(crate) use append::append_history_hyperlink_lines_at_placement;
+pub(crate) use append::replace_history_tail_at_placement;
 
 use std::io;
 use std::io::Write;
@@ -69,6 +70,11 @@ impl InlineHistoryPlacement {
 
     pub(crate) fn covered_rows(&self) -> u16 {
         self.covered_rows
+    }
+
+    #[cfg(test)]
+    pub(crate) fn retained_lines(&self) -> &[HyperlinkLine] {
+        &self.retained_lines
     }
 
     /// Record a full-screen scroll and retire retained rows that entered scrollback.
@@ -150,6 +156,25 @@ impl InlineHistoryPlacement {
             remove_count += 1;
         }
         self.retained_lines.drain(..remove_count);
+    }
+
+    fn has_complete_retained_source(&self, wrap_width: usize) -> bool {
+        retained_history_row_count(&self.retained_lines, wrap_width)
+            >= usize::from(self.retained_screen_rows())
+    }
+
+    fn retained_tail_matches(&self, lines: &[HyperlinkLine]) -> bool {
+        self.retained_lines.ends_with(lines)
+    }
+
+    fn record_visible_history_tail_removal(&mut self, line_count: usize, rows: u16) {
+        debug_assert_eq!(self.covered_rows, 0);
+        debug_assert!(line_count <= self.retained_lines.len());
+        debug_assert!(rows <= self.visible_rows);
+        self.retained_lines
+            .truncate(self.retained_lines.len() - line_count);
+        self.history_bottom -= rows;
+        self.visible_rows -= rows;
     }
 
     fn update_for_viewport(&mut self, viewport_top: u16) -> bool {

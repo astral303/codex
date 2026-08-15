@@ -36,7 +36,16 @@ impl ChatWidget {
                 // Stream finalization supplies one trailing newline when the last delta omitted it.
                 streamed != completed && streamed.strip_suffix('\n') != Some(completed)
             });
-            let scrollback_reflow = if had_live_tail || completed_message_differs {
+            // Windows history writes clear and repaint only the inline viewport, so committing a
+            // held-back table tail removes its provisional render without discarding scrollback.
+            // Other terminals retain the full-reflow fallback that prevents duplicate table tails.
+            #[cfg(windows)]
+            let can_commit_live_tail = cell.is_some();
+            #[cfg(not(windows))]
+            let can_commit_live_tail = false;
+            let live_tail_requires_global_reflow = had_live_tail && !can_commit_live_tail;
+            let scrollback_reflow = if live_tail_requires_global_reflow || completed_message_differs
+            {
                 crate::app_event::ConsolidationScrollbackReflow::Required
             } else {
                 crate::app_event::ConsolidationScrollbackReflow::IfResizeReflowRan

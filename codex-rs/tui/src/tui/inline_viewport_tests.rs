@@ -4,6 +4,7 @@ use super::CoveredHistoryPolicy;
 use super::WindowsInlineViewportState;
 use crate::custom_terminal::Terminal as CustomTerminal;
 use crate::insert_history::HistoryLineWrapPolicy;
+use crate::insert_history::HistoryTailReplacement;
 use crate::insert_history::InlineHistoryPlacement;
 use crate::insert_history::update_inline_history_for_viewport;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
@@ -505,6 +506,112 @@ fn full_screen_popup_keeps_history_covered_until_the_viewport_shrinks() {
     );
     assert!(terminal.backend().append_lines_calls().is_empty());
     assert_eq!(rows[25].trim_end(), "COMPOSER");
+}
+
+#[test]
+fn replaced_history_tail_remains_source_backed_after_viewport_growth() {
+    let width = 20;
+    let height = 10;
+    let mut terminal = terminal(
+        width,
+        height,
+        Rect::new(/*x*/ 0, /*y*/ 7, width, /*height*/ 3),
+    );
+    let initial_history = plain_hyperlink_lines(vec![
+        Line::from("HISTORY-1"),
+        Line::from("HISTORY-2"),
+        Line::from("HISTORY-3"),
+        Line::from("OLD-TAIL"),
+    ]);
+    let mut state = WindowsInlineViewportState {
+        placement: Some(InlineHistoryPlacement::new(
+            /*history_bottom*/ 3, /*visible_rows*/ 0,
+        )),
+    };
+    state
+        .append_standard_history(
+            &mut terminal,
+            &initial_history,
+            HistoryLineWrapPolicy::PreWrap,
+        )
+        .expect("seed history");
+
+    let outcome = state
+        .replace_visible_history_tail(
+            &mut terminal,
+            &plain_hyperlink_lines(vec![Line::from("OLD-TAIL")]),
+            &plain_hyperlink_lines(vec![Line::from("UPDATED-TAIL")]),
+            HistoryLineWrapPolicy::PreWrap,
+        )
+        .expect("replace retained tail");
+    assert_eq!(outcome, Some(HistoryTailReplacement::Replaced));
+
+    state
+        .update_for_resize_reflow(&mut terminal, /*height*/ 5, Size::new(width, height))
+        .expect("grow viewport");
+    terminal
+        .draw(|frame| {
+            for row in 5..7 {
+                frame.buffer_mut().set_string(
+                    /*x*/ 0,
+                    row,
+                    "POPUP",
+                    ratatui::style::Style::default(),
+                );
+            }
+        })
+        .expect("cover history tail");
+    state
+        .update_for_resize_reflow(&mut terminal, /*height*/ 3, Size::new(width, height))
+        .expect("shrink viewport");
+
+    let rows = terminal
+        .backend()
+        .vt100()
+        .screen()
+        .rows(/*start column*/ 0, width)
+        .map(|row| row.trim_end().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        &rows[3..7],
+        ["HISTORY-1", "HISTORY-2", "HISTORY-3", "UPDATED-TAIL"]
+    );
+    let placement = state.placement.as_ref().expect("placement");
+    assert_eq!((placement.visible_rows(), placement.covered_rows()), (4, 0));
+}
+
+#[test]
+fn tracked_tail_replacement_reports_incomplete_source() {
+    let width = 20;
+    let height = 10;
+    let mut terminal = terminal(
+        width,
+        height,
+        Rect::new(/*x*/ 0, /*y*/ 7, width, /*height*/ 3),
+    );
+    let mut state = WindowsInlineViewportState {
+        placement: Some(InlineHistoryPlacement::new(
+            /*history_bottom*/ 7, /*visible_rows*/ 4,
+        )),
+    };
+    let before = terminal.backend().vt100().screen().contents();
+
+    let outcome = state
+        .replace_visible_history_tail(
+            &mut terminal,
+            &plain_hyperlink_lines(vec![Line::from("OLD-TAIL")]),
+            &plain_hyperlink_lines(vec![Line::from("UPDATED-TAIL")]),
+            HistoryLineWrapPolicy::PreWrap,
+        )
+        .expect("report missing source");
+
+    assert_eq!(
+        outcome,
+        Some(HistoryTailReplacement::RequiresTranscriptReflow)
+    );
+    assert_eq!(terminal.backend().vt100().screen().contents(), before);
+    let placement = state.placement.as_ref().expect("placement");
+    assert_eq!((placement.visible_rows(), placement.covered_rows()), (4, 0));
 }
 
 #[test]

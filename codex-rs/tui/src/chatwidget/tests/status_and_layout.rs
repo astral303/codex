@@ -355,7 +355,7 @@ async fn flush_answer_stream_keeps_default_reflow_for_plain_text_tail() {
 }
 
 #[tokio::test]
-async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
+async fn flush_answer_stream_commits_live_table_tail_only_on_windows() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let cwd = chat.config.cwd.to_path_buf();
 
@@ -377,6 +377,69 @@ async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
 
     chat.flush_answer_stream_with_separator();
 
+    #[cfg(windows)]
+    let platform_commits_live_tail = true;
+    #[cfg(not(windows))]
+    let platform_commits_live_tail = false;
+    let mut saw_consolidate = false;
+    let mut saw_insert_history = false;
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            AppEvent::InsertHistoryCell(_) => saw_insert_history = true,
+            AppEvent::ConsolidateAgentMessage {
+                scrollback_reflow,
+                deferred_history_cell,
+                ..
+            } => {
+                saw_consolidate = true;
+                let expected_reflow = if platform_commits_live_tail {
+                    crate::app_event::ConsolidationScrollbackReflow::IfResizeReflowRan
+                } else {
+                    crate::app_event::ConsolidationScrollbackReflow::Required
+                };
+                assert_eq!(scrollback_reflow, expected_reflow);
+                assert_eq!(
+                    deferred_history_cell.is_none(),
+                    platform_commits_live_tail,
+                    "only Windows can commit the table tail through a scoped viewport repaint",
+                );
+            }
+            _ => {}
+        }
+    }
+
+    assert!(
+        saw_consolidate,
+        "expected stream finalization to consolidate"
+    );
+    assert_eq!(
+        saw_insert_history, platform_commits_live_tail,
+        "only Windows can insert the table tail without a global transcript reflow",
+    );
+}
+
+#[tokio::test]
+async fn completed_table_mismatch_keeps_global_reflow_fallback() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let cwd = chat.config.cwd.to_path_buf();
+
+    let mut controller = crate::streaming::controller::StreamController::new(
+        Some(80),
+        cwd.as_path(),
+        HistoryRenderMode::Rich,
+    );
+    controller.push("| Name | Notes |\n");
+    controller.push("| --- | --- |\n");
+    controller.push("| alpha | streamed value |\n");
+    assert!(controller.has_live_tail());
+    chat.stream_controller = Some(controller);
+
+    while rx.try_recv().is_ok() {}
+
+    chat.finalize_completed_assistant_message(Some(
+        "| Name | Notes |\n| --- | --- |\n| alpha | authoritative value |\n",
+    ));
+
     let mut saw_consolidate = false;
     let mut saw_insert_history = false;
     while let Ok(event) = rx.try_recv() {
@@ -390,11 +453,11 @@ async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
                 saw_consolidate = true;
                 assert_eq!(
                     scrollback_reflow,
-                    crate::app_event::ConsolidationScrollbackReflow::Required
+                    crate::app_event::ConsolidationScrollbackReflow::Required,
                 );
                 assert!(
                     deferred_history_cell.is_some(),
-                    "live table tail should be staged for consolidation",
+                    "mismatched stream tails must wait for authoritative transcript replay",
                 );
             }
             _ => {}
@@ -407,7 +470,7 @@ async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
     );
     assert!(
         !saw_insert_history,
-        "live table tail should not be inserted before canonical reflow"
+        "mismatched stream tails must not be inserted before authoritative replay",
     );
 }
 

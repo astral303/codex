@@ -17,6 +17,8 @@ pub(crate) use inline_history::repaint_inline_history_tail;
 #[cfg(any(windows, test))]
 pub(crate) use inline_history::repaint_inline_history_with_covered_rows;
 #[cfg(any(windows, test))]
+pub(crate) use inline_history::replace_history_tail_at_placement;
+#[cfg(any(windows, test))]
 pub(crate) use inline_history::update_inline_history_for_viewport;
 
 use std::fmt;
@@ -60,6 +62,17 @@ use ratatui::text::Span;
 pub enum HistoryLineWrapPolicy {
     PreWrap,
     Terminal,
+}
+
+/// Outcome of attempting to replace a terminal-history tail in place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HistoryTailReplacement {
+    /// The terminal tail and any tracked placement state were updated together.
+    Replaced,
+    /// Generic terminal history does not expose the previous tail for replacement.
+    NotVisible,
+    /// Tracked placement cannot replace the tail safely; rebuild from transcript source.
+    RequiresTranscriptReflow,
 }
 
 /// Selects the terminal escape strategy used when writing history above the viewport.

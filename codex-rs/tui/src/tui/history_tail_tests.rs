@@ -1,6 +1,7 @@
 use super::replace_visible_terminal_history_tail;
 use crate::custom_terminal::Terminal;
 use crate::insert_history::HistoryLineWrapPolicy;
+use crate::insert_history::HistoryTailReplacement;
 use crate::insert_history::InsertHistoryMode;
 use crate::insert_history::insert_history_lines;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
@@ -49,7 +50,7 @@ fn replacing_visible_history_tail_preserves_existing_terminal_scrollback() {
         Line::from("Thread usage: 50 credits"),
         Line::from("new closing border"),
     ]);
-    assert!(
+    assert_eq!(
         replace_visible_terminal_history_tail(
             &mut terminal,
             &previous_lines,
@@ -57,7 +58,8 @@ fn replacing_visible_history_tail_preserves_existing_terminal_scrollback() {
             InsertHistoryMode::Standard,
             HistoryLineWrapPolicy::PreWrap,
         )
-        .expect("replace status-card tail")
+        .expect("replace status-card tail"),
+        HistoryTailReplacement::Replaced,
     );
 
     let contents = terminal.backend().vt100().screen().contents();
@@ -92,15 +94,16 @@ fn inaccessible_history_tail_is_preserved_for_non_destructive_append() {
         plain_hyperlink_lines(vec![Line::from("first line"), Line::from("second line")]);
     let replacement = plain_hyperlink_lines(vec![Line::from("Thread usage: 50 credits")]);
 
-    assert!(
-        !replace_visible_terminal_history_tail(
+    assert_eq!(
+        replace_visible_terminal_history_tail(
             &mut terminal,
             &previous_lines,
             &replacement,
             InsertHistoryMode::Standard,
             HistoryLineWrapPolicy::PreWrap,
         )
-        .expect("leave inaccessible history untouched")
+        .expect("leave inaccessible history untouched"),
+        HistoryTailReplacement::NotVisible,
     );
     assert_eq!(terminal.backend().vt100().screen().contents(), before);
 }
@@ -127,7 +130,7 @@ fn replacing_soft_wrapped_history_counts_physical_terminal_rows() {
     .expect("insert soft-wrapped history");
     let replacement = plain_hyperlink_lines(vec![Line::from("new billing")]);
 
-    assert!(
+    assert_eq!(
         replace_visible_terminal_history_tail(
             &mut terminal,
             &previous_lines,
@@ -135,7 +138,8 @@ fn replacing_soft_wrapped_history_counts_physical_terminal_rows() {
             InsertHistoryMode::Standard,
             HistoryLineWrapPolicy::Terminal,
         )
-        .expect("replace physically wrapped rows")
+        .expect("replace physically wrapped rows"),
+        HistoryTailReplacement::Replaced,
     );
     let contents = terminal.backend().vt100().screen().contents();
     assert!(contents.contains("new billing"), "{contents}");

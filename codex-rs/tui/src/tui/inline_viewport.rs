@@ -5,6 +5,7 @@ use std::io::Write;
 
 use crate::custom_terminal::Terminal;
 use crate::insert_history::HistoryLineWrapPolicy;
+use crate::insert_history::HistoryTailReplacement;
 #[cfg(any(windows, test))]
 use crate::insert_history::InlineHistoryPlacement;
 use crate::insert_history::InsertHistoryMode;
@@ -15,6 +16,8 @@ use crate::insert_history::insert_history_hyperlink_lines_with_mode_and_wrap_pol
 use crate::insert_history::record_inline_history_terminal_scroll;
 #[cfg(any(windows, test))]
 use crate::insert_history::repaint_inline_history_tail;
+#[cfg(any(windows, test))]
+use crate::insert_history::replace_history_tail_at_placement;
 #[cfg(any(windows, test))]
 use crate::insert_history::update_inline_history_for_viewport;
 use crate::terminal_hyperlinks::HyperlinkLine;
@@ -61,6 +64,37 @@ impl InlineViewportState {
                 wrap_policy,
             )
         }
+    }
+
+    pub(super) fn replace_visible_history_tail<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        previous_lines: &[HyperlinkLine],
+        replacement: &[HyperlinkLine],
+        wrap_policy: HistoryLineWrapPolicy,
+    ) -> io::Result<Option<HistoryTailReplacement>>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        #[cfg(windows)]
+        {
+            self.windows.replace_visible_history_tail(
+                terminal,
+                previous_lines,
+                replacement,
+                wrap_policy,
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (terminal, previous_lines, replacement, wrap_policy);
+            Ok(None)
+        }
+    }
+
+    #[cfg(all(test, windows))]
+    pub(super) fn retained_source_for_test(&self) -> Option<&[HyperlinkLine]> {
+        self.windows.retained_source_for_test()
     }
 
     pub(super) fn pending_history_precedes_resize(
@@ -157,6 +191,13 @@ impl WindowsInlineViewportState {
         self.placement = None;
     }
 
+    #[cfg(test)]
+    pub(super) fn retained_source_for_test(&self) -> Option<&[HyperlinkLine]> {
+        self.placement
+            .as_ref()
+            .map(InlineHistoryPlacement::retained_lines)
+    }
+
     pub(super) fn pending_history_precedes_resize(
         &self,
         requested_top: u16,
@@ -165,6 +206,29 @@ impl WindowsInlineViewportState {
         self.placement
             .as_ref()
             .is_some_and(|placement| !placement.has_covered_rows() && requested_top <= current_top)
+    }
+
+    pub(super) fn replace_visible_history_tail<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        previous_lines: &[HyperlinkLine],
+        replacement: &[HyperlinkLine],
+        wrap_policy: HistoryLineWrapPolicy,
+    ) -> io::Result<Option<HistoryTailReplacement>>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        let Some(placement) = self.placement.as_mut() else {
+            return Ok(None);
+        };
+        replace_history_tail_at_placement(
+            terminal,
+            previous_lines,
+            replacement,
+            wrap_policy,
+            placement,
+        )
+        .map(Some)
     }
 
     pub(super) fn append_standard_history<B>(

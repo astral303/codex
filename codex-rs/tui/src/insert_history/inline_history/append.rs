@@ -9,6 +9,7 @@ use super::repaint_inline_history_with_covered_rows;
 use super::sync_terminal_visible_history_rows;
 use crate::custom_terminal::Terminal;
 use crate::insert_history::HistoryLineWrapPolicy;
+use crate::insert_history::HistoryTailReplacement;
 use crate::insert_history::InsertHistoryMode;
 use crate::insert_history::insert_history_hyperlink_lines_with_mode_and_wrap_policy;
 use crate::insert_history::wrap_history_hyperlink_lines;
@@ -77,6 +78,61 @@ where
     placement.record_gap_append(appended_rows, &prepared_lines, wrap_width);
     sync_terminal_visible_history_rows(terminal, placement);
     Ok(())
+}
+
+/// Replace a retained history suffix through the same placement boundary used by appends.
+pub(crate) fn replace_history_tail_at_placement<B>(
+    terminal: &mut Terminal<B>,
+    previous_lines: &[HyperlinkLine],
+    replacement: &[HyperlinkLine],
+    wrap_policy: HistoryLineWrapPolicy,
+    placement: &mut InlineHistoryPlacement,
+) -> io::Result<HistoryTailReplacement>
+where
+    B: Backend<Error = io::Error> + Write,
+{
+    let viewport_top = terminal.viewport_area.top();
+    let wrap_width = usize::from(terminal.viewport_area.width.max(1));
+    let (prepared_previous, previous_rows) =
+        wrap_history_hyperlink_lines(previous_lines, wrap_width, wrap_policy);
+    let Ok(previous_rows) = u16::try_from(previous_rows) else {
+        return Ok(HistoryTailReplacement::RequiresTranscriptReflow);
+    };
+    let exposable_rows = placement.retained_screen_rows().min(viewport_top);
+    if !placement.has_complete_retained_source(wrap_width)
+        || !placement.retained_tail_matches(&prepared_previous)
+        || previous_rows > exposable_rows
+    {
+        return Ok(HistoryTailReplacement::RequiresTranscriptReflow);
+    }
+
+    expose_covered_rows_before_append(terminal, placement)?;
+    let tail_start = placement.history_bottom.saturating_sub(previous_rows);
+    clear_history_rows(terminal, tail_start, previous_rows)?;
+    placement.record_visible_history_tail_removal(prepared_previous.len(), previous_rows);
+    sync_terminal_visible_history_rows(terminal, placement);
+    append_history_hyperlink_lines_at_placement(terminal, replacement, wrap_policy, placement)?;
+    Ok(HistoryTailReplacement::Replaced)
+}
+
+fn clear_history_rows<B>(terminal: &mut Terminal<B>, start: u16, rows: u16) -> io::Result<()>
+where
+    B: Backend<Error = io::Error> + Write,
+{
+    let last_cursor_pos = terminal.last_known_cursor_pos;
+    let end = start.saturating_add(rows);
+    let writer = terminal.backend_mut();
+    for row in start..end {
+        queue!(writer, MoveTo(/*x*/ 0, row), Clear(ClearType::CurrentLine))?;
+    }
+    queue!(
+        writer,
+        MoveTo(last_cursor_pos.x, last_cursor_pos.y),
+        SetForegroundColor(Color::Reset),
+        SetBackgroundColor(Color::Reset),
+        SetAttribute(Attribute::Reset),
+    )?;
+    std::io::Write::flush(writer)
 }
 
 fn paint_history_into_gap<B>(
@@ -191,6 +247,22 @@ mod tests {
         .expect("append history");
     }
 
+    fn replace_tail(
+        terminal: &mut TestTerminal,
+        placement: &mut InlineHistoryPlacement,
+        previous: &[HyperlinkLine],
+        replacement: &[HyperlinkLine],
+    ) -> HistoryTailReplacement {
+        replace_history_tail_at_placement(
+            terminal,
+            previous,
+            replacement,
+            HistoryLineWrapPolicy::PreWrap,
+            placement,
+        )
+        .expect("replace history tail")
+    }
+
     fn screen_rows(terminal: &TestTerminal, width: u16) -> Vec<String> {
         terminal
             .backend()
@@ -218,6 +290,72 @@ mod tests {
         assert_eq!((placement.history_bottom, placement.visible_rows), (7, 7));
         assert_eq!(terminal.visible_history_rows(), 7);
         assert_eq!(placement.retained_lines, pending);
+    }
+
+    #[test]
+    fn replacing_history_tail_keeps_source_geometry_and_cache_in_sync() {
+        let mut terminal = terminal(20, 10, Rect::new(/*x*/ 0, /*y*/ 7, 20, /*height*/ 3));
+        write_markers(
+            &mut terminal,
+            &[(7, "STATUS"), (8, "COMPOSER"), (9, "FOOTER")],
+        );
+        let mut placement =
+            InlineHistoryPlacement::new(/*history_bottom*/ 3, /*visible_rows*/ 0);
+        let initial = history(&["HISTORY-1", "HISTORY-2", "HISTORY-3", "OLD-TAIL"]);
+        append(&mut terminal, &mut placement, &initial);
+
+        let expanded_tail = history(&["EXPANDED-1", "EXPANDED-2"]);
+        assert_eq!(
+            replace_tail(
+                &mut terminal,
+                &mut placement,
+                &history(&["OLD-TAIL"]),
+                &expanded_tail,
+            ),
+            HistoryTailReplacement::Replaced
+        );
+        assert_eq!(
+            (
+                placement.history_bottom,
+                placement.visible_rows,
+                placement.covered_rows,
+                terminal.visible_history_rows(),
+            ),
+            (7, 5, 0, 5)
+        );
+        assert_eq!(
+            placement.retained_lines,
+            history(&[
+                "HISTORY-1",
+                "HISTORY-2",
+                "HISTORY-3",
+                "EXPANDED-1",
+                "EXPANDED-2",
+            ])
+        );
+
+        let final_tail = history(&["FINAL-TAIL"]);
+        assert_eq!(
+            replace_tail(&mut terminal, &mut placement, &expanded_tail, &final_tail,),
+            HistoryTailReplacement::Replaced
+        );
+        assert_eq!(
+            (
+                placement.history_bottom,
+                placement.visible_rows,
+                placement.covered_rows,
+                terminal.visible_history_rows(),
+            ),
+            (6, 4, 0, 4)
+        );
+        assert_eq!(
+            placement.retained_lines,
+            history(&["HISTORY-1", "HISTORY-2", "HISTORY-3", "FINAL-TAIL"])
+        );
+        assert_eq!(
+            &screen_rows(&terminal, 20)[6..],
+            ["", "STATUS", "COMPOSER", "FOOTER"]
+        );
     }
 
     #[test]
