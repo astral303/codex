@@ -26,18 +26,47 @@ impl ChatWidget {
         }
     }
 
-    /// Synchronize the bottom-pane "task running" indicator with the current lifecycles.
+    /// Synchronize the bottom-pane "task running" indicator with pending and active work.
     ///
-    /// The bottom pane only has one running flag, but this module treats it as a derived state of
-    /// both the agent turn lifecycle and MCP startup lifecycle.
+    /// The bottom pane only has one running flag, derived from a submitted turn awaiting its start
+    /// event, the active agent or review lifecycle, and MCP startup.
     pub(super) fn update_task_running_state(&mut self) {
         self.bottom_pane.set_task_running(
-            self.turn_lifecycle.agent_turn_running
+            self.input_queue.user_turn_pending_start
+                || self.turn_lifecycle.agent_turn_running
                 || self.review.is_review_mode
                 || self.mcp_startup_status.is_some(),
         );
         self.refresh_plan_mode_nudge();
         self.refresh_status_surfaces();
+    }
+
+    /// Reserve the pending-start state and report whether this attempt created it.
+    pub(crate) fn reserve_user_turn_pending_start(&mut self) -> bool {
+        if self.input_queue.user_turn_pending_start {
+            return false;
+        }
+        self.input_queue.user_turn_pending_start = true;
+        self.update_task_running_state();
+        true
+    }
+
+    /// Clear an isolated pending-start reservation and refresh its derived UI state.
+    pub(crate) fn clear_user_turn_pending_start(&mut self) {
+        self.input_queue.user_turn_pending_start = false;
+        self.update_task_running_state();
+    }
+
+    /// Release only the reservation created by the failed dispatch attempt.
+    pub(crate) fn rollback_user_turn_pending_start(&mut self, reservation_created: bool) {
+        if reservation_created {
+            self.clear_user_turn_pending_start();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn user_turn_pending_start_for_test(&self) -> bool {
+        self.input_queue.user_turn_pending_start
     }
 
     pub(super) fn collect_runtime_metrics_delta(&mut self) {
@@ -374,12 +403,19 @@ impl ChatWidget {
         self.maybe_send_next_queued_input();
     }
 
-    pub(crate) fn handle_turn_start_rejection(&mut self, message: String) -> bool {
+    pub(crate) fn handle_turn_start_rejection(&mut self, message: String) {
+        // Dispatch has already rolled back this attempt's reservation. Do not finalize here: an
+        // older accepted start may still own the shared pending state.
+        self.add_to_history(history_cell::new_error_event(message));
         if !self.input_queue.user_turn_pending_start {
-            return false;
+            self.input_queue.submit_pending_steers_after_interrupt = false;
+            self.set_ambient_pet_notification(
+                crate::pets::PetNotificationKind::Failed,
+                /*body*/ None,
+            );
+            self.maybe_send_next_queued_input();
         }
-        self.on_error(message);
-        true
+        self.request_redraw();
     }
 
     pub(super) fn on_cyber_policy_error(&mut self) {

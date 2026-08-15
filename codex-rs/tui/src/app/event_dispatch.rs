@@ -617,20 +617,21 @@ impl App {
                     self.chat_widget.pre_draw_tick();
                     self.render_chat_widget_frame(tui, screen_size)?;
                 }
-                self.chat_widget.prepare_local_op_submission(&op);
+                if matches!(&op, AppCommand::Interrupt) {
+                    self.chat_widget.apply_accepted_interrupt_cleanup();
+                }
                 if let Err(err) = self.submit_active_thread_op(app_server, op).await {
-                    let handled = is_user_turn
+                    let turn_start_rejected = is_user_turn
                         && matches!(
                             err.downcast_ref::<TypedRequestError>(),
                             Some(TypedRequestError::Server { method, .. })
                                 if method == "turn/start"
-                        )
-                        && self
-                            .chat_widget
-                            .handle_turn_start_rejection(format!("Failed to start turn: {err:#}"));
-                    if !handled {
+                        );
+                    if !turn_start_rejected {
                         return Err(err);
                     }
+                    self.chat_widget
+                        .handle_turn_start_rejection(format!("Failed to start turn: {err:#}"));
                     tracing::error!(error = ?err, "failed to start turn through app server");
                 }
             }

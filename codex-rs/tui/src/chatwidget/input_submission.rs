@@ -371,9 +371,6 @@ impl ChatWidget {
         if !self.submit_op(op.clone()) {
             return (false, None);
         }
-        if render_in_history {
-            self.input_queue.user_turn_pending_start = true;
-        }
 
         // Persist the submitted text to cross-session message history. Mentions are encoded into
         // placeholder syntax so recall can reconstruct the mention bindings in a future session.

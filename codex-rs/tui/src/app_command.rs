@@ -239,8 +239,14 @@ impl AppCommand {
         Self::ApproveGuardianDeniedAction { event }
     }
 
-    pub(crate) fn is_review(&self) -> bool {
-        matches!(self, Self::Review { .. })
+    pub(crate) fn starts_turn(&self) -> bool {
+        matches!(
+            self,
+            Self::UserTurn { .. }
+                | Self::Compact
+                | Self::Review { .. }
+                | Self::RunUserShellCommand { .. }
+        )
     }
 }
 
