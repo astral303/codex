@@ -5603,6 +5603,41 @@ async fn resizing_empty_transcript_schedules_settled_size_recheck() {
     );
 }
 
+#[tokio::test]
+async fn repeated_slash_popup_height_changes_do_not_schedule_transcript_reflow() -> Result<()> {
+    let (mut app, _rx, _op_rx) = make_test_app_with_channels().await;
+    app.transcript_cells = vec![plain_line_cell("committed history")];
+    app.has_emitted_history_lines = true;
+    let screen_size = ratatui::layout::Size::new(/*width*/ 40, /*height*/ 24);
+    let mut tui = crate::tui::test_support::make_test_tui_with_size(screen_size)?;
+
+    app.render_chat_widget_frame(&mut tui, screen_size)?;
+    let mut viewport_heights = vec![tui.terminal.viewport_area.height];
+
+    for text in [
+        "/", "/m", "/mc", "/mcp", "/mc", "/m", "/", "", "/", "/m", "/mc", "/mcp", "",
+    ] {
+        app.chat_widget.apply_external_edit(text.to_string());
+        app.render_chat_widget_frame(&mut tui, screen_size)?;
+        viewport_heights.push(tui.terminal.viewport_area.height);
+    }
+
+    assert!(
+        viewport_heights
+            .windows(2)
+            .any(|heights| heights[1] < heights[0]),
+        "expected slash-popup filtering to shrink the inline viewport: {viewport_heights:?}"
+    );
+    assert!(
+        viewport_heights
+            .windows(2)
+            .any(|heights| heights[1] > heights[0]),
+        "expected repeated slash-popup input to grow the inline viewport: {viewport_heights:?}"
+    );
+    assert!(!app.transcript_reflow.has_pending_reflow());
+    Ok(())
+}
+
 fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItem>) -> Turn {
     Turn {
         id: turn_id.to_string(),

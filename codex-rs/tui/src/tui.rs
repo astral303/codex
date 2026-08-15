@@ -55,6 +55,7 @@ use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use crate::tui::event_stream::EventBroker;
 use crate::tui::event_stream::TuiEventStream;
+use crate::tui::inline_viewport::InlineViewportState;
 #[cfg(unix)]
 use crate::tui::job_control::SuspendContext;
 use crate::tui::screen_size::ScreenSizePolicy;
@@ -65,6 +66,7 @@ mod event_stream;
 mod frame_rate_limiter;
 mod frame_requester;
 mod history_tail;
+mod inline_viewport;
 mod input_boundary;
 #[cfg(unix)]
 mod job_control;
@@ -598,6 +600,7 @@ pub struct Tui {
     is_zellij: bool,
     // When false, enter_alt_screen() becomes a no-op.
     alt_screen_enabled: bool,
+    inline_viewport: InlineViewportState,
     // Keeps unmanaged process stderr writes out of the inline viewport.
     _stderr_guard: terminal_stderr::TerminalStderrGuard,
 }
@@ -652,6 +655,7 @@ impl Tui {
             notification_condition: NotificationCondition::default(),
             is_zellij,
             alt_screen_enabled: true,
+            inline_viewport: InlineViewportState::default(),
             _stderr_guard: stderr_guard,
         }
     }
@@ -884,49 +888,6 @@ impl Tui {
         self.pending_history_lines.clear();
     }
 
-    /// Resize the inline viewport for the resize-reflow path.
-    ///
-    /// Unlike the legacy draw path, this path does not scroll rows above the viewport when the
-    /// terminal shrinks. Resize reflow owns rebuilding those rows from transcript source, so
-    /// scrolling here would move the viewport once and then replay history into the wrong row.
-    fn update_inline_viewport_for_resize_reflow(
-        terminal: &mut Terminal,
-        height: u16,
-        screen_size: Size,
-    ) -> Result<bool> {
-        let terminal_height_shrank = screen_size.height < terminal.last_known_screen_size.height;
-        let terminal_height_grew = screen_size.height > terminal.last_known_screen_size.height;
-        let viewport_was_bottom_aligned =
-            terminal.viewport_area.bottom() == terminal.last_known_screen_size.height;
-        let previous_area = terminal.viewport_area;
-
-        let mut area = terminal.viewport_area;
-        area.height = height.min(screen_size.height);
-        area.width = screen_size.width;
-        let mut needs_full_repaint = false;
-
-        if area.bottom() > screen_size.height {
-            let scroll_by = area.bottom() - screen_size.height;
-            if !terminal_height_shrank {
-                terminal
-                    .backend_mut()
-                    .scroll_region_up(0..area.top(), scroll_by)?;
-            }
-            area.y = screen_size.height - area.height;
-        } else if terminal_height_grew && viewport_was_bottom_aligned {
-            area.y = screen_size.height - area.height;
-        }
-
-        if area != terminal.viewport_area {
-            let clear_position = Position::new(/*x*/ 0, previous_area.y.min(area.y));
-            terminal.set_viewport_area(area);
-            terminal.clear_after_position(clear_position)?;
-            needs_full_repaint = true;
-        }
-
-        Ok(needs_full_repaint)
-    }
-
     /// Write any buffered history lines above the viewport and clear the buffer.
     fn flush_pending_history_lines(
         terminal: &mut Terminal,
@@ -1112,7 +1073,8 @@ impl Tui {
 
             let terminal = &mut self.terminal;
             let needs_full_repaint =
-                Self::update_inline_viewport_for_resize_reflow(terminal, height, screen_size)?;
+                self.inline_viewport
+                    .update_for_resize_reflow(terminal, height, screen_size)?;
             // A zero- or one-row history region cannot isolate raw history writes from the
             // viewport, so replayed rows can leave stale cells inside the composer.
             let history_can_overlap_viewport =
