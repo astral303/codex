@@ -38,7 +38,7 @@ use super::super::footer::reset_mode_after_activity;
 use super::super::textarea::VimPersistentState;
 use super::ActivePopup;
 use super::ChatComposer;
-use super::ComposerDraft;
+use super::EditableDraft;
 use super::InputResult;
 use super::vim_history::VimHistory;
 use crate::app_event::AppEvent;
@@ -56,7 +56,7 @@ use crate::ui_consts::FOOTER_INDENT_COLS;
 #[derive(Debug)]
 pub(super) struct HistorySearchSession {
     /// Draft to restore when search is canceled or a query has no match.
-    original_draft: ComposerDraft,
+    original_draft: EditableDraft,
     /// Same-draft Vim edits to restore when a temporary preview is canceled.
     original_vim_history: VimHistory,
     /// Active and completed Vim commands suspended during temporary draft replacement.
@@ -201,6 +201,7 @@ impl ChatComposer {
                     self.history.reset_search();
                     self.footer.mode = reset_mode_after_activity(self.footer.mode);
                     self.move_cursor_to_end();
+                    self.establish_undo_baseline();
                 }
                 (InputResult::None, true)
             }
