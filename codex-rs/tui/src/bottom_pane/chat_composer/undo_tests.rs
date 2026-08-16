@@ -72,3 +72,13 @@ fn oversized_draft_clears_older_history() {
     assert!(!history.record(draft("a draft that cannot fit")));
     assert_eq!(history.undo(draft("current")), None);
 }
+
+#[test]
+#[should_panic(expected = "composer undo history retained-byte accounting underflow")]
+fn retained_byte_underflow_is_not_hidden() {
+    let mut history = ComposerUndoHistory::default();
+    history.record(draft("before"));
+    history.retained_bytes = 0;
+
+    let _ = history.undo(draft("after"));
+}
