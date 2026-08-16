@@ -134,6 +134,27 @@ pub(crate) struct ComposerKeymap {
     pub(crate) history_search_previous: Vec<KeyBinding>,
     /// Move to the next match in reverse history search.
     pub(crate) history_search_next: Vec<KeyBinding>,
+    /// Undo the most recent composer draft edit.
+    pub(crate) undo: Vec<KeyBinding>,
+    /// Redo the most recently undone composer draft edit.
+    pub(crate) redo: Vec<KeyBinding>,
+}
+
+fn default_composer_history_modifiers() -> KeyModifiers {
+    if cfg!(windows) {
+        KeyModifiers::CONTROL
+    } else {
+        KeyModifiers::ALT
+    }
+}
+
+pub(crate) fn default_composer_undo_binding() -> KeyBinding {
+    KeyBinding::new(KeyCode::Char('z'), default_composer_history_modifiers())
+}
+
+pub(crate) fn default_composer_redo_binding() -> KeyBinding {
+    let modifiers = default_composer_history_modifiers() | KeyModifiers::SHIFT;
+    KeyBinding::new(KeyCode::Char('z'), modifiers)
 }
 
 /// Editor-specific keybindings used by the composer textarea.
@@ -579,6 +600,20 @@ impl RuntimeKeymap {
                     binding.action.context.overlaps(KeymapContext::Global)
                         && binding.chord.prefix.parts() == key_hint::alt(KeyCode::Char('a')).parts()
                 }));
+        let undo_default_is_shadowed = keymap.composer.undo.is_none()
+            && configured_main_surface_alias_is_used(
+                keymap,
+                if cfg!(windows) { "ctrl-z" } else { "alt-z" },
+            );
+        let redo_default_is_shadowed = keymap.composer.redo.is_none()
+            && configured_main_surface_alias_is_used(
+                keymap,
+                if cfg!(windows) {
+                    "ctrl-shift-z"
+                } else {
+                    "alt-shift-z"
+                },
+            );
 
         let app = AppKeymap {
             open_agents: if open_agents_default_is_shadowed {
@@ -677,6 +712,16 @@ impl RuntimeKeymap {
                 history_search_previous
             ),
             history_search_next: resolve_local!(keymap, defaults, composer, history_search_next),
+            undo: if undo_default_is_shadowed {
+                Vec::new()
+            } else {
+                resolve_local!(keymap, defaults, composer, undo)
+            },
+            redo: if redo_default_is_shadowed {
+                Vec::new()
+            } else {
+                resolve_local!(keymap, defaults, composer, redo)
+            },
         };
 
         let editor = Arc::new(EditorKeymap {
@@ -1235,6 +1280,8 @@ impl RuntimeKeymap {
                 ],
                 history_search_previous: default_bindings![ctrl(KeyCode::Char('r'))],
                 history_search_next: default_bindings![ctrl(KeyCode::Char('s'))],
+                undo: vec![default_composer_undo_binding()],
+                redo: vec![default_composer_redo_binding()],
             },
             editor: Arc::new(EditorKeymap {
                 insert_newline: default_bindings![
@@ -1566,6 +1613,8 @@ impl RuntimeKeymap {
                     "composer.history_search_next",
                     self.composer.history_search_next.as_slice(),
                 ),
+                ("composer.undo", self.composer.undo.as_slice()),
+                ("composer.redo", self.composer.redo.as_slice()),
             ],
         )?;
 
@@ -1619,6 +1668,8 @@ impl RuntimeKeymap {
                     "composer.history_search_next",
                     self.composer.history_search_next.as_slice(),
                 ),
+                ("composer.undo", self.composer.undo.as_slice()),
+                ("composer.redo", self.composer.redo.as_slice()),
             ],
             MAIN_RESERVED_BINDINGS,
             [(
@@ -1731,6 +1782,8 @@ impl RuntimeKeymap {
                     "composer.history_search_previous",
                     self.composer.history_search_previous.as_slice(),
                 ),
+                ("composer.undo", self.composer.undo.as_slice()),
+                ("composer.redo", self.composer.redo.as_slice()),
             ],
             [
                 (
@@ -2198,6 +2251,8 @@ See the Codex keymap documentation for supported actions and examples."
 }
 
 const MAIN_RESERVED_BINDINGS: &[(&str, KeyBinding)] = &[
+    #[cfg(unix)]
+    ("fixed.suspend", key_hint::ctrl(KeyCode::Char('z'))),
     (
         "fixed.interrupt_or_quit",
         key_hint::ctrl(KeyCode::Char('c')),
@@ -2681,6 +2736,23 @@ mod tests {
             vec![key_hint::ctrl(KeyCode::Char('s'))]
         );
         assert_eq!(runtime.editor.kill_whole_line, Vec::new());
+    }
+
+    #[test]
+    fn undo_defaults_yield_to_existing_editor_bindings() {
+        let (undo, redo) = if cfg!(windows) {
+            ("ctrl-z", "ctrl-shift-z")
+        } else {
+            ("alt-z", "alt-shift-z")
+        };
+        let mut keymap = TuiKeymap::default();
+        keymap.editor.move_line_start = Some(one(undo));
+        keymap.editor.move_line_end = Some(one(redo));
+
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("editor bindings should win");
+
+        assert!(runtime.composer.undo.is_empty());
+        assert!(runtime.composer.redo.is_empty());
     }
 
     #[test]
