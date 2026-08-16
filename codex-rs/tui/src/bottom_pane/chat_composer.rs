@@ -291,6 +291,7 @@ use super::mentions_v2::MentionV2Popup;
 use super::mentions_v2::MentionV2Selection;
 use super::paste_burst::CharDecision;
 use super::paste_burst::PasteBurst;
+use super::paste_burst::RetroGrab;
 use super::prompt_args::parse_slash_name;
 use super::skill_popup::MentionItem;
 use super::skill_popup::SkillPopup;
@@ -2220,15 +2221,24 @@ impl ChatComposer {
             return (InputResult::None, changed);
         }
 
+        self.dispatch_with_undo_history(|composer| match &mut composer.popups.active {
+            ActivePopup::Command(_) => composer.handle_key_event_with_slash_popup(key_event),
+            ActivePopup::File(_) => composer.handle_key_event_with_file_popup(key_event),
+            ActivePopup::Skill(_) => composer.handle_key_event_with_skill_popup(key_event),
+            ActivePopup::MentionV2(_) => {
+                composer.handle_key_event_with_mentions_v2_popup(key_event)
+            }
+            ActivePopup::None => composer.handle_key_event_without_popup(key_event),
+        })
+    }
+
+    fn dispatch_with_undo_history(
+        &mut self,
+        dispatch: impl FnOnce(&mut Self) -> (InputResult, bool),
+    ) -> (InputResult, bool) {
         let before_edit = self.snapshot_draft();
         let history_epoch_before_dispatch = self.undo_history.mutation_epoch();
-        let result = match &mut self.popups.active {
-            ActivePopup::Command(_) => self.handle_key_event_with_slash_popup(key_event),
-            ActivePopup::File(_) => self.handle_key_event_with_file_popup(key_event),
-            ActivePopup::Skill(_) => self.handle_key_event_with_skill_popup(key_event),
-            ActivePopup::MentionV2(_) => self.handle_key_event_with_mentions_v2_popup(key_event),
-            ActivePopup::None => self.handle_key_event_without_popup(key_event),
-        };
+        let result = dispatch(self);
         self.reset_vim_mode_after_successful_dispatch(&result.0);
         // Some handlers record their own undo step. Record here only if none changed history.
         let nested_handler_mutated_history =
@@ -2250,6 +2260,17 @@ impl ChatComposer {
         result
     }
 
+    #[cfg(test)]
+    fn handle_input_basic_with_time_and_undo_history(
+        &mut self,
+        key_event: KeyEvent,
+        now: Instant,
+    ) -> (InputResult, bool) {
+        self.dispatch_with_undo_history(|composer| {
+            composer.handle_input_basic_with_time(key_event, now)
+        })
+    }
+
     /// Whether a popup or query owns input.
     pub(crate) fn popup_active(&self) -> bool {
         self.history_search.is_some()
@@ -2269,6 +2290,34 @@ impl ChatComposer {
                 .unwrap_or(0);
         }
         p
+    }
+
+    /// Move a retro-captured prefix into the paste buffer, reporting whether the textarea
+    /// retracted it.
+    ///
+    /// Vim replace mode restores overwritten characters rather than deleting them, so
+    /// retraction fails when the burst does not line up with the recorded replace steps.
+    /// The caller then abandons burst detection for this character.
+    fn try_move_retro_capture_to_paste_buffer(
+        &mut self,
+        grab: RetroGrab,
+        next_char: char,
+        now: Instant,
+    ) -> bool {
+        let provisional_edit_count = grab.grabbed.chars().count();
+        if !grab.grabbed.is_empty() && !self.draft.textarea.retract_paste_burst(grab.start_byte) {
+            return false;
+        }
+        let draft_before_provisional_edits = self.snapshot_draft();
+        assert!(
+            self.undo_history.try_discard_provisional_edits(
+                provisional_edit_count,
+                &draft_before_provisional_edits,
+            ),
+            "composer undo provisional edit boundary mismatch"
+        );
+        self.draft.paste_burst.append_char_to_buffer(next_char, now);
+        true
     }
 
     /// Handle non-ASCII character input (often IME) while still supporting paste-burst detection.
@@ -2334,13 +2383,8 @@ impl ChatComposer {
                             before,
                             retro_chars as usize,
                         ) {
-                            if grab.grabbed.is_empty()
-                                || self.draft.textarea.retract_paste_burst(grab.start_byte)
-                            {
-                                self.undo_history
-                                    .discard_provisional_edits(retro_chars as usize);
-                                // seed the paste burst buffer with everything (grabbed + new)
-                                self.draft.paste_burst.append_char_to_buffer(ch, now);
+                            // seed the paste burst buffer with everything (grabbed + new)
+                            if self.try_move_retro_capture_to_paste_buffer(grab, ch, now) {
                                 return (InputResult::None, true);
                             }
                             self.draft.paste_burst.clear_after_explicit_paste();
@@ -3943,12 +3987,7 @@ impl ChatComposer {
                             before,
                             retro_chars as usize,
                         ) {
-                            if grab.grabbed.is_empty()
-                                || self.draft.textarea.retract_paste_burst(grab.start_byte)
-                            {
-                                self.undo_history
-                                    .discard_provisional_edits(retro_chars as usize);
-                                self.draft.paste_burst.append_char_to_buffer(ch, now);
+                            if self.try_move_retro_capture_to_paste_buffer(grab, ch, now) {
                                 return (InputResult::None, true);
                             }
                             self.draft.paste_burst.clear_after_explicit_paste();

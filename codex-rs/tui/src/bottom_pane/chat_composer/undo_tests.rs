@@ -82,6 +82,7 @@ fn retained_byte_underflow_is_not_hidden() {
 
     let _ = history.undo(draft("after"));
 }
+
 #[test]
 fn discarding_provisional_edits_preserves_earlier_history() {
     let mut history = ComposerUndoHistory::default();
@@ -89,9 +90,25 @@ fn discarding_provisional_edits_preserves_earlier_history() {
     history.record(draft("stable"));
     history.record(draft("stable界"));
 
-    history.discard_provisional_edits(2);
+    assert!(history.try_discard_provisional_edits(2, &draft("stable")));
     history.record(draft("stable"));
 
     assert_eq!(history.undo(draft("stable界界")), Some(draft("stable")));
+    assert_eq!(history.undo(draft("stable")), Some(draft("")));
+}
+
+#[test]
+fn invalid_provisional_edit_boundary_preserves_history() {
+    let mut history = ComposerUndoHistory::default();
+    history.record(draft(""));
+    history.record(draft("stable"));
+    history.record(draft("stable界"));
+    let mutation_epoch = history.mutation_epoch();
+
+    assert!(!history.try_discard_provisional_edits(4, &draft("stable")));
+    assert!(!history.try_discard_provisional_edits(2, &draft("wrong baseline")));
+    assert_eq!(history.mutation_epoch(), mutation_epoch);
+    assert_eq!(history.undo(draft("stable界界")), Some(draft("stable界")));
+    assert_eq!(history.undo(draft("stable界")), Some(draft("stable")));
     assert_eq!(history.undo(draft("stable")), Some(draft("")));
 }
