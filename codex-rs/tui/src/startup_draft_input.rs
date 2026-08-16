@@ -208,8 +208,14 @@ pub(super) fn handle_startup_draft_key(
         }
     }
 
-    if key_hint::has_ctrl_or_alt(key.modifiers) && !bottom_pane.is_safe_startup_editor_key(key)
-        || key.code == KeyCode::Enter && !bottom_pane.is_safe_startup_editor_key(key)
+    if key_hint::has_ctrl_or_alt(key.modifiers) {
+        if bottom_pane.is_safe_startup_editor_key(key) {
+            bottom_pane.handle_startup_editor_key(key);
+        }
+        return Ok(());
+    }
+
+    if key.code == KeyCode::Enter && !bottom_pane.is_safe_startup_editor_key(key)
         || key
             .modifiers
             .intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)
