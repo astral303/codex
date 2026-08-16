@@ -7,7 +7,8 @@
 //! newest entry. Batch responses populate the shared cache even when the active search has moved
 //! on, but only the awaited cursor resumes a search; stale log IDs are ignored, and batch read
 //! failures follow a bounded retry path. Local entries are already available with full draft
-//! metadata.
+//! metadata. Normal navigation returns its direction with the selected entry so cached and
+//! asynchronous recalls use the same composer transition.
 //!
 //! Ctrl+R search is modeled separately from normal Up/Down navigation because it has different
 //! guarantees: query edits restart from the newest match, repeated Older/Newer keys move through
@@ -148,7 +149,7 @@ pub(crate) struct ChatComposerHistory {
     /// Current cursor within the combined (persistent + local) history. `None`
     /// indicates the user is *not* currently browsing history.
     history_cursor: Option<isize>,
-    pending_navigation_direction: Option<HistorySearchDirection>,
+    pending_navigation_direction: Option<HistoryDirection>,
 
     /// The text that was last inserted into the composer as a result of
     /// history navigation. Used to decide if further Up/Down presses should be
@@ -163,11 +164,21 @@ pub(crate) struct ChatComposerHistory {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum HistorySearchDirection {
+pub(crate) enum HistoryDirection {
     /// Traverse toward older history offsets.
     Older,
     /// Traverse toward newer history offsets.
     Newer,
+}
+
+/// One normal Up/Down history step ready to apply to the composer.
+///
+/// Keeping the direction beside the entry prevents asynchronous lookup from losing whether the
+/// selected state should align with undo or redo history.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HistoryNavigation {
+    pub(crate) direction: HistoryDirection,
+    pub(crate) entry: HistoryEntry,
 }
 
 /// Result of a single incremental history search step.
@@ -192,7 +203,7 @@ pub(crate) enum HistorySearchResult {
 /// ignored if it belongs to a stale log or an offset the composer no longer needs.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum HistoryEntryResponse {
-    Found(HistoryEntry),
+    Found(HistoryNavigation),
     Search(HistorySearchResult),
     Ignored,
 }
@@ -240,7 +251,7 @@ struct UniqueHistoryMatch {
 enum PendingHistorySearch {
     Entry {
         offset: usize,
-        direction: HistorySearchDirection,
+        direction: HistoryDirection,
         boundary_if_exhausted: bool,
     },
     Batch {
@@ -406,7 +417,7 @@ impl ChatComposerHistory {
     /// Local entries can be returned immediately, while missing persistent entries emit a
     /// `LookupMessageHistoryEntry` and return `None` until the response arrives. Calling this while
     /// Ctrl+R search is active intentionally exits search traversal.
-    pub fn navigate_up(&mut self, app_event_tx: &AppEventSender) -> Option<HistoryEntry> {
+    pub fn navigate_up(&mut self, app_event_tx: &AppEventSender) -> Option<HistoryNavigation> {
         self.search = None;
         let total_entries = self.persistent_entry_count + self.local_history.len();
         if total_entries == 0 {
@@ -420,19 +431,15 @@ impl ChatComposerHistory {
         };
 
         self.history_cursor = Some(next_idx);
-        self.populate_history_at_index(
-            next_idx as usize,
-            HistorySearchDirection::Older,
-            app_event_tx,
-        )
+        self.populate_history_at_index(next_idx as usize, HistoryDirection::Older, app_event_tx)
     }
 
     /// Handles Down by moving toward newer entries or clearing the composer past the newest entry.
     ///
-    /// Returning an empty `HistoryEntry` means the user moved past the newest known entry and the
-    /// caller should clear the composer draft. As with Up, invoking this during Ctrl+R search clears
-    /// search state and resumes normal shell-style browsing.
-    pub fn navigate_down(&mut self, app_event_tx: &AppEventSender) -> Option<HistoryEntry> {
+    /// Returning a navigation with an empty entry means the user moved past the newest known entry
+    /// and the caller should clear the composer draft. As with Up, invoking this during Ctrl+R
+    /// search clears search state and resumes normal shell-style browsing.
+    pub fn navigate_down(&mut self, app_event_tx: &AppEventSender) -> Option<HistoryNavigation> {
         self.search = None;
         let total_entries = self.persistent_entry_count + self.local_history.len();
         if total_entries == 0 {
@@ -448,18 +455,17 @@ impl ChatComposerHistory {
         match next_idx_opt {
             Some(idx) => {
                 self.history_cursor = Some(idx);
-                self.populate_history_at_index(
-                    idx as usize,
-                    HistorySearchDirection::Newer,
-                    app_event_tx,
-                )
+                self.populate_history_at_index(idx as usize, HistoryDirection::Newer, app_event_tx)
             }
             None => {
                 // Past newest – clear and exit browsing mode.
                 self.history_cursor = None;
                 self.pending_navigation_direction = None;
                 self.last_history_text = None;
-                Some(HistoryEntry::new(String::new()))
+                Some(HistoryNavigation {
+                    direction: HistoryDirection::Newer,
+                    entry: HistoryEntry::new(String::new()),
+                })
             }
         }
     }
@@ -503,7 +509,7 @@ impl ChatComposerHistory {
                 .and_then(|search| search.awaiting)
                 .unwrap_or(PendingHistorySearch::Entry {
                     offset,
-                    direction: HistorySearchDirection::Older,
+                    direction: HistoryDirection::Older,
                     boundary_if_exhausted: false,
                 });
             let PendingHistorySearch::Entry {
@@ -521,12 +527,12 @@ impl ChatComposerHistory {
                 return HistoryEntryResponse::Search(self.search_match(offset, entry));
             }
             let result = match direction {
-                HistorySearchDirection::Older => self.advance_older_search_after_entry_miss(
+                HistoryDirection::Older => self.advance_older_search_after_entry_miss(
                     offset,
                     boundary_if_exhausted,
                     app_event_tx,
                 ),
-                HistorySearchDirection::Newer => self.advance_search_after(
+                HistoryDirection::Newer => self.advance_search_after(
                     offset,
                     direction,
                     boundary_if_exhausted,
@@ -537,13 +543,13 @@ impl ChatComposerHistory {
         }
 
         if self.history_cursor == Some(offset as isize) {
-            let direction = self.pending_navigation_direction.take();
+            let Some(direction) = self.pending_navigation_direction.take() else {
+                return HistoryEntryResponse::Ignored;
+            };
             let Some(entry) = entry else {
                 return HistoryEntryResponse::Ignored;
             };
-            if self.persistent_entry_duplicates_local(&entry)
-                && let Some(direction) = direction
-            {
+            if self.persistent_entry_duplicates_local(&entry) {
                 let Some(offset) = self.next_history_offset(offset, direction) else {
                     return HistoryEntryResponse::Ignored;
                 };
@@ -554,7 +560,7 @@ impl ChatComposerHistory {
                     .unwrap_or(HistoryEntryResponse::Ignored);
             }
             self.last_history_text = Some(entry.text.clone());
-            return HistoryEntryResponse::Found(entry);
+            return HistoryEntryResponse::Found(HistoryNavigation { direction, entry });
         }
 
         HistoryEntryResponse::Ignored
@@ -571,7 +577,7 @@ impl ChatComposerHistory {
     pub fn search(
         &mut self,
         query: &str,
-        direction: HistorySearchDirection,
+        direction: HistoryDirection,
         restart: bool,
         app_event_tx: &AppEventSender,
     ) -> HistorySearchResult {
@@ -649,7 +655,7 @@ impl ChatComposerHistory {
     fn search_start_offset(
         &self,
         total_entries: usize,
-        direction: HistorySearchDirection,
+        direction: HistoryDirection,
         restart: bool,
     ) -> Option<usize> {
         let selected = self
@@ -657,14 +663,14 @@ impl ChatComposerHistory {
             .as_ref()
             .and_then(|search| search.selected_offset);
         match direction {
-            HistorySearchDirection::Older => {
+            HistoryDirection::Older => {
                 if restart {
                     total_entries.checked_sub(1)
                 } else {
                     selected.and_then(|offset| offset.checked_sub(1))
                 }
             }
-            HistorySearchDirection::Newer => {
+            HistoryDirection::Newer => {
                 if restart {
                     Some(0)
                 } else {
@@ -679,13 +685,13 @@ impl ChatComposerHistory {
     fn advance_search_after(
         &mut self,
         offset: usize,
-        direction: HistorySearchDirection,
+        direction: HistoryDirection,
         boundary_if_exhausted: bool,
         app_event_tx: &AppEventSender,
     ) -> HistorySearchResult {
         let next_offset = match direction {
-            HistorySearchDirection::Older => offset.checked_sub(1),
-            HistorySearchDirection::Newer => offset
+            HistoryDirection::Older => offset.checked_sub(1),
+            HistoryDirection::Newer => offset
                 .checked_add(1)
                 .filter(|next| *next < self.total_entries()),
         };
@@ -704,7 +710,7 @@ impl ChatComposerHistory {
     fn advance_search_from(
         &mut self,
         mut offset: usize,
-        direction: HistorySearchDirection,
+        direction: HistoryDirection,
         boundary_if_exhausted: bool,
         app_event_tx: &AppEventSender,
     ) -> HistorySearchResult {
@@ -717,7 +723,7 @@ impl ChatComposerHistory {
             } else if !self.fetched_history.contains_key(&offset)
                 && offset < self.persistent_entry_count
             {
-                if direction == HistorySearchDirection::Older
+                if direction == HistoryDirection::Older
                     && let Some(cursor) = self
                         .search
                         .as_ref()
@@ -748,8 +754,8 @@ impl ChatComposerHistory {
             }
 
             let next_offset = match direction {
-                HistorySearchDirection::Older => offset.checked_sub(1),
-                HistorySearchDirection::Newer => {
+                HistoryDirection::Older => offset.checked_sub(1),
+                HistoryDirection::Newer => {
                     offset.checked_add(1).filter(|next| *next < total_entries)
                 }
             };
@@ -800,17 +806,17 @@ impl ChatComposerHistory {
 
     fn select_cached_unique_match(
         &mut self,
-        direction: HistorySearchDirection,
+        direction: HistoryDirection,
     ) -> Option<HistorySearchResult> {
         let next_index = {
             let search = self.search.as_ref()?;
             let selected_index = search.selected_match_index?;
             match direction {
-                HistorySearchDirection::Older => {
+                HistoryDirection::Older => {
                     let next_index = selected_index + 1;
                     (next_index < search.unique_matches.len()).then_some(next_index)?
                 }
-                HistorySearchDirection::Newer => selected_index.checked_sub(1)?,
+                HistoryDirection::Newer => selected_index.checked_sub(1)?,
             }
         };
 
@@ -825,7 +831,7 @@ impl ChatComposerHistory {
 
     fn exhausted_search_result(
         &mut self,
-        direction: HistorySearchDirection,
+        direction: HistoryDirection,
         boundary_if_exhausted: bool,
     ) -> HistorySearchResult {
         if let Some(search) = self.search.as_mut() {
@@ -845,9 +851,9 @@ impl ChatComposerHistory {
     fn populate_history_at_index(
         &mut self,
         global_idx: usize,
-        direction: HistorySearchDirection,
+        direction: HistoryDirection,
         app_event_tx: &AppEventSender,
-    ) -> Option<HistoryEntry> {
+    ) -> Option<HistoryNavigation> {
         let mut global_idx = global_idx;
         loop {
             if let Some(entry) = self.entry_at_cached_offset(global_idx) {
@@ -864,7 +870,7 @@ impl ChatComposerHistory {
                 }
                 self.pending_navigation_direction = None;
                 self.last_history_text = Some(entry.text.clone());
-                return Some(entry);
+                return Some(HistoryNavigation { direction, entry });
             }
 
             if global_idx >= self.persistent_entry_count {
@@ -883,14 +889,10 @@ impl ChatComposerHistory {
         }
     }
 
-    fn next_history_offset(
-        &self,
-        offset: usize,
-        direction: HistorySearchDirection,
-    ) -> Option<usize> {
+    fn next_history_offset(&self, offset: usize, direction: HistoryDirection) -> Option<usize> {
         match direction {
-            HistorySearchDirection::Older => offset.checked_sub(1),
-            HistorySearchDirection::Newer => offset
+            HistoryDirection::Older => offset.checked_sub(1),
+            HistoryDirection::Newer => offset
                 .checked_add(1)
                 .filter(|next| *next < self.total_entries()),
         }
@@ -919,17 +921,17 @@ impl HistorySearchState {
         }
     }
 
-    fn is_exhausted(&self, direction: HistorySearchDirection) -> bool {
+    fn is_exhausted(&self, direction: HistoryDirection) -> bool {
         match direction {
-            HistorySearchDirection::Older => self.exhausted_older,
-            HistorySearchDirection::Newer => self.exhausted_newer,
+            HistoryDirection::Older => self.exhausted_older,
+            HistoryDirection::Newer => self.exhausted_newer,
         }
     }
 
-    fn mark_exhausted(&mut self, direction: HistorySearchDirection) {
+    fn mark_exhausted(&mut self, direction: HistoryDirection) {
         match direction {
-            HistorySearchDirection::Older => self.exhausted_older = true,
-            HistorySearchDirection::Newer => self.exhausted_newer = true,
+            HistoryDirection::Older => self.exhausted_older = true,
+            HistoryDirection::Newer => self.exhausted_newer = true,
         }
     }
 
@@ -989,6 +991,13 @@ mod tests {
         }
     }
 
+    fn older_navigation(entry: HistoryEntry) -> HistoryNavigation {
+        HistoryNavigation {
+            direction: HistoryDirection::Older,
+            entry,
+        }
+    }
+
     #[test]
     fn duplicate_submissions_are_not_recorded() {
         let mut history = ChatComposerHistory::new();
@@ -1034,7 +1043,10 @@ mod tests {
         history.set_metadata(test_thread_id(), /*log_id*/ 1, /*entry_count*/ 0);
 
         assert!(history.startup_local_history().is_empty());
-        assert_eq!(history.navigate_up(&tx), Some(startup_entry));
+        assert_eq!(
+            history.navigate_up(&tx),
+            Some(older_navigation(startup_entry))
+        );
 
         history.record_local_submission(HistoryEntry::new("thread-owned draft".to_string()));
         history.set_metadata(ThreadId::new(), /*log_id*/ 2, /*entry_count*/ 0);
@@ -1058,7 +1070,7 @@ mod tests {
         );
         assert_eq!(
             disabled,
-            HistoryEntryResponse::Found(HistoryEntry {
+            HistoryEntryResponse::Found(older_navigation(HistoryEntry {
                 text: "$sample and $figma".to_string(),
                 text_elements: Vec::new(),
                 local_image_paths: Vec::new(),
@@ -1076,7 +1088,7 @@ mod tests {
                     },
                 ],
                 pending_pastes: Vec::new(),
-            })
+            }))
         );
 
         history.set_at_mention_restore_enabled(/*enabled*/ true);
@@ -1089,7 +1101,7 @@ mod tests {
         );
         assert_eq!(
             enabled,
-            HistoryEntryResponse::Found(HistoryEntry {
+            HistoryEntryResponse::Found(older_navigation(HistoryEntry {
                 text: "@sample and $figma".to_string(),
                 text_elements: Vec::new(),
                 local_image_paths: Vec::new(),
@@ -1107,7 +1119,7 @@ mod tests {
                     },
                 ],
                 pending_pastes: Vec::new(),
-            })
+            }))
         );
     }
 
@@ -1125,7 +1137,7 @@ mod tests {
         // First Up should recall current-session local history.
         assert!(history.should_handle_navigation("", /*cursor*/ 0));
         assert_eq!(
-            Some(HistoryEntry::new("latest".to_string())),
+            Some(older_navigation(HistoryEntry::new("latest".to_string()))),
             history.navigate_up(&tx)
         );
 
@@ -1148,7 +1160,7 @@ mod tests {
 
         // Inject the async response.
         assert_eq!(
-            HistoryEntryResponse::Found(HistoryEntry::new("latest".to_string())),
+            HistoryEntryResponse::Found(older_navigation(HistoryEntry::new("latest".to_string()))),
             history.on_entry_response(
                 /*log_id*/ 1,
                 /*offset*/ 2,
@@ -1175,7 +1187,7 @@ mod tests {
         assert_eq!(log_id, 1);
 
         assert_eq!(
-            HistoryEntryResponse::Found(HistoryEntry::new("older".to_string())),
+            HistoryEntryResponse::Found(older_navigation(HistoryEntry::new("older".to_string()))),
             history.on_entry_response(
                 /*log_id*/ 1,
                 /*offset*/ 1,
@@ -1197,57 +1209,27 @@ mod tests {
 
         assert_eq!(
             HistorySearchResult::Found(HistoryEntry::new("git diff".to_string())),
-            history.search(
-                "git",
-                HistorySearchDirection::Older,
-                /*restart*/ true,
-                &tx
-            )
+            history.search("git", HistoryDirection::Older, /*restart*/ true, &tx)
         );
         assert_eq!(
             HistorySearchResult::Found(HistoryEntry::new("git status".to_string())),
-            history.search(
-                "git",
-                HistorySearchDirection::Older,
-                /*restart*/ false,
-                &tx
-            )
+            history.search("git", HistoryDirection::Older, /*restart*/ false, &tx)
         );
         assert_eq!(
             HistorySearchResult::AtBoundary,
-            history.search(
-                "git",
-                HistorySearchDirection::Older,
-                /*restart*/ false,
-                &tx
-            )
+            history.search("git", HistoryDirection::Older, /*restart*/ false, &tx)
         );
         assert_eq!(
             HistorySearchResult::AtBoundary,
-            history.search(
-                "git",
-                HistorySearchDirection::Older,
-                /*restart*/ false,
-                &tx
-            )
+            history.search("git", HistoryDirection::Older, /*restart*/ false, &tx)
         );
         assert_eq!(
             HistorySearchResult::Found(HistoryEntry::new("git diff".to_string())),
-            history.search(
-                "git",
-                HistorySearchDirection::Newer,
-                /*restart*/ false,
-                &tx
-            )
+            history.search("git", HistoryDirection::Newer, /*restart*/ false, &tx)
         );
         assert_eq!(
             HistorySearchResult::AtBoundary,
-            history.search(
-                "git",
-                HistorySearchDirection::Newer,
-                /*restart*/ false,
-                &tx
-            )
+            history.search("git", HistoryDirection::Newer, /*restart*/ false, &tx)
         );
     }
 
@@ -1264,48 +1246,23 @@ mod tests {
 
         assert_eq!(
             HistorySearchResult::Found(HistoryEntry::new("git diff".to_string())),
-            history.search(
-                "git",
-                HistorySearchDirection::Older,
-                /*restart*/ true,
-                &tx
-            )
+            history.search("git", HistoryDirection::Older, /*restart*/ true, &tx)
         );
         assert_eq!(
             HistorySearchResult::Found(HistoryEntry::new("git status".to_string())),
-            history.search(
-                "git",
-                HistorySearchDirection::Older,
-                /*restart*/ false,
-                &tx
-            )
+            history.search("git", HistoryDirection::Older, /*restart*/ false, &tx)
         );
         assert_eq!(
             HistorySearchResult::AtBoundary,
-            history.search(
-                "git",
-                HistorySearchDirection::Older,
-                /*restart*/ false,
-                &tx
-            )
+            history.search("git", HistoryDirection::Older, /*restart*/ false, &tx)
         );
         assert_eq!(
             HistorySearchResult::Found(HistoryEntry::new("git diff".to_string())),
-            history.search(
-                "git",
-                HistorySearchDirection::Newer,
-                /*restart*/ false,
-                &tx
-            )
+            history.search("git", HistoryDirection::Newer, /*restart*/ false, &tx)
         );
         assert_eq!(
             HistorySearchResult::Found(HistoryEntry::new("git status".to_string())),
-            history.search(
-                "git",
-                HistorySearchDirection::Older,
-                /*restart*/ false,
-                &tx
-            )
+            history.search("git", HistoryDirection::Older, /*restart*/ false, &tx)
         );
     }
 
@@ -1321,7 +1278,7 @@ mod tests {
             HistorySearchResult::Pending,
             history.search(
                 "needle",
-                HistorySearchDirection::Older,
+                HistoryDirection::Older,
                 /*restart*/ true,
                 &tx
             )
@@ -1343,7 +1300,7 @@ mod tests {
             HistorySearchResult::Pending,
             history.search(
                 "needle",
-                HistorySearchDirection::Older,
+                HistoryDirection::Older,
                 /*restart*/ false,
                 &tx
             )
@@ -1380,7 +1337,7 @@ mod tests {
             HistorySearchResult::AtBoundary,
             history.search(
                 "needle",
-                HistorySearchDirection::Older,
+                HistoryDirection::Older,
                 /*restart*/ false,
                 &tx
             )
@@ -1399,12 +1356,7 @@ mod tests {
 
         assert_eq!(
             HistorySearchResult::Pending,
-            history.search(
-                "older",
-                HistorySearchDirection::Older,
-                /*restart*/ true,
-                &tx
-            )
+            history.search("older", HistoryDirection::Older, /*restart*/ true, &tx)
         );
         let AppEvent::LookupMessageHistoryEntry {
             thread_id: response_thread_id,
@@ -1465,7 +1417,7 @@ mod tests {
             HistorySearchResult::Pending,
             history.search(
                 "needle",
-                HistorySearchDirection::Older,
+                HistoryDirection::Older,
                 /*restart*/ true,
                 &tx
             )
@@ -1487,7 +1439,7 @@ mod tests {
             HistorySearchResult::Pending,
             history.search(
                 "needle",
-                HistorySearchDirection::Older,
+                HistoryDirection::Older,
                 /*restart*/ false,
                 &tx
             )
@@ -1527,7 +1479,7 @@ mod tests {
             HistorySearchResult::AtBoundary,
             history.search(
                 "needle",
-                HistorySearchDirection::Older,
+                HistoryDirection::Older,
                 /*restart*/ false,
                 &tx
             )
@@ -1536,7 +1488,7 @@ mod tests {
             HistorySearchResult::Found(HistoryEntry::new("needle same".to_string())),
             history.search(
                 "needle",
-                HistorySearchDirection::Newer,
+                HistoryDirection::Newer,
                 /*restart*/ false,
                 &tx
             )
@@ -1555,19 +1507,14 @@ mod tests {
             HistorySearchResult::Found(HistoryEntry::new("Build Release".to_string())),
             history.search(
                 "release",
-                HistorySearchDirection::Older,
+                HistoryDirection::Older,
                 /*restart*/ true,
                 &tx
             )
         );
         assert_eq!(
             HistorySearchResult::Found(HistoryEntry::new("Build Release".to_string())),
-            history.search(
-                "",
-                HistorySearchDirection::Older,
-                /*restart*/ true,
-                &tx
-            )
+            history.search("", HistoryDirection::Older, /*restart*/ true, &tx)
         );
     }
 
@@ -1586,11 +1533,11 @@ mod tests {
             .insert(2, Some(HistoryEntry::new("command3".to_string())));
 
         assert_eq!(
-            Some(HistoryEntry::new("command3".to_string())),
+            Some(older_navigation(HistoryEntry::new("command3".to_string()))),
             history.navigate_up(&tx)
         );
         assert_eq!(
-            Some(HistoryEntry::new("command2".to_string())),
+            Some(older_navigation(HistoryEntry::new("command2".to_string()))),
             history.navigate_up(&tx)
         );
 
@@ -1599,7 +1546,7 @@ mod tests {
         assert!(history.last_history_text.is_none());
 
         assert_eq!(
-            Some(HistoryEntry::new("command3".to_string())),
+            Some(older_navigation(HistoryEntry::new("command3".to_string()))),
             history.navigate_up(&tx)
         );
     }
