@@ -62,12 +62,7 @@ fn start_older_search(
     newest_offset: usize,
 ) -> HistoryBatchCursor {
     assert_eq!(
-        history.search(
-            query,
-            HistorySearchDirection::Older,
-            /*restart*/ true,
-            tx
-        ),
+        history.search(query, HistoryDirection::Older, /*restart*/ true, tx),
         HistorySearchResult::Pending
     );
     let (offset, log_id) = recv_entry_request(rx);
@@ -105,7 +100,7 @@ fn search_batch_late_data_is_cache_only_after_cancel_or_query_edit() {
     assert_eq!(
         cancelled.search(
             "cached",
-            HistorySearchDirection::Older,
+            HistoryDirection::Older,
             /*restart*/ true,
             &tx
         ),
@@ -116,12 +111,7 @@ fn search_batch_late_data_is_cache_only_after_cancel_or_query_edit() {
     let (mut edited, tx, mut rx) = history(/*entry_count*/ 5);
     start_older_search(&mut edited, &tx, &mut rx, "old", /*newest_offset*/ 4);
     assert_eq!(
-        edited.search(
-            "new",
-            HistorySearchDirection::Older,
-            /*restart*/ true,
-            &tx
-        ),
+        edited.search("new", HistoryDirection::Older, /*restart*/ true, &tx),
         HistorySearchResult::Pending
     );
     let (offset, _) = recv_entry_request(&mut rx);
@@ -204,7 +194,7 @@ fn search_batch_read_failure_stops_after_bounded_retries() {
     assert_eq!(
         history.search(
             "retry",
-            HistorySearchDirection::Older,
+            HistoryDirection::Older,
             /*restart*/ false,
             &tx,
         ),
@@ -243,7 +233,7 @@ fn search_batch_match_preserves_cursor_for_next_older_search() {
     assert_eq!(
         history.search(
             "needle",
-            HistorySearchDirection::Older,
+            HistoryDirection::Older,
             /*restart*/ false,
             &tx,
         ),
