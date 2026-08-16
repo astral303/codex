@@ -82,3 +82,16 @@ fn retained_byte_underflow_is_not_hidden() {
 
     let _ = history.undo(draft("after"));
 }
+#[test]
+fn discarding_provisional_edits_preserves_earlier_history() {
+    let mut history = ComposerUndoHistory::default();
+    history.record(draft(""));
+    history.record(draft("stable"));
+    history.record(draft("stable界"));
+
+    history.discard_provisional_edits(2);
+    history.record(draft("stable"));
+
+    assert_eq!(history.undo(draft("stable界界")), Some(draft("stable")));
+    assert_eq!(history.undo(draft("stable")), Some(draft("")));
+}
