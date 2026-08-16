@@ -37,7 +37,7 @@ use super::super::footer::footer_height;
 use super::super::footer::reset_mode_after_activity;
 use super::ActivePopup;
 use super::ChatComposer;
-use super::ComposerDraft;
+use super::EditableDraft;
 use super::InputResult;
 use crate::app_event::AppEvent;
 use crate::key_hint;
@@ -54,7 +54,7 @@ use crate::ui_consts::FOOTER_INDENT_COLS;
 #[derive(Clone, Debug)]
 pub(super) struct HistorySearchSession {
     /// Draft to restore when search is canceled or a query has no match.
-    original_draft: ComposerDraft,
+    original_draft: EditableDraft,
     /// Footer-owned query text typed while Ctrl+R search is active.
     query: String,
     /// User-visible search status used to choose footer hints and composer preview behavior.
@@ -187,6 +187,7 @@ impl ChatComposer {
                     self.history.reset_search();
                     self.footer.mode = reset_mode_after_activity(self.footer.mode);
                     self.move_cursor_to_end();
+                    self.establish_undo_baseline();
                 }
                 (InputResult::None, true)
             }
