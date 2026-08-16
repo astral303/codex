@@ -181,7 +181,7 @@ pub(crate) struct ComposerKeymap {
     pub(crate) redo: Vec<KeyBinding>,
 }
 
-fn default_composer_history_modifiers() -> KeyModifiers {
+fn default_composer_undo_redo_modifiers() -> KeyModifiers {
     if cfg!(windows) {
         KeyModifiers::CONTROL
     } else {
@@ -190,11 +190,11 @@ fn default_composer_history_modifiers() -> KeyModifiers {
 }
 
 pub(crate) fn default_composer_undo_binding() -> KeyBinding {
-    KeyBinding::new(KeyCode::Char('z'), default_composer_history_modifiers())
+    KeyBinding::new(KeyCode::Char('z'), default_composer_undo_redo_modifiers())
 }
 
 pub(crate) fn default_composer_redo_binding() -> KeyBinding {
-    let modifiers = default_composer_history_modifiers() | KeyModifiers::SHIFT;
+    let modifiers = default_composer_undo_redo_modifiers() | KeyModifiers::SHIFT;
     KeyBinding::new(KeyCode::Char('z'), modifiers)
 }
 
@@ -701,19 +701,17 @@ impl RuntimeKeymap {
             .collect();
 
         let undo_default_is_shadowed = keymap.composer.undo.is_none()
-            && configured_main_surface_alias_is_used(
-                keymap,
-                if cfg!(windows) { "ctrl-z" } else { "alt-z" },
-            );
+            && defaults
+                .composer
+                .undo
+                .iter()
+                .any(|binding| configured_main_surface_binding_is_used(keymap, *binding));
         let redo_default_is_shadowed = keymap.composer.redo.is_none()
-            && configured_main_surface_alias_is_used(
-                keymap,
-                if cfg!(windows) {
-                    "ctrl-shift-z"
-                } else {
-                    "alt-shift-z"
-                },
-            );
+            && defaults
+                .composer
+                .redo
+                .iter()
+                .any(|binding| configured_main_surface_binding_is_used(keymap, *binding));
         let app = AppKeymap {
             open_agents: resolve_bindings(
                 keymap.global.open_agents.as_ref(),
@@ -2608,6 +2606,11 @@ fn configured_bindings_to_preserve<const N: usize>(
 }
 
 fn configured_main_surface_alias_is_used(keymap: &TuiKeymap, alias: &str) -> bool {
+    parse_keybinding(alias)
+        .is_some_and(|binding| configured_main_surface_binding_is_used(keymap, binding))
+}
+
+fn configured_main_surface_binding_is_used(keymap: &TuiKeymap, binding: KeyBinding) -> bool {
     let mut global = keymap.global.clone();
     if keymap.composer.submit.is_some() {
         global.submit = None;
@@ -2620,15 +2623,15 @@ fn configured_main_surface_alias_is_used(keymap: &TuiKeymap, alias: &str) -> boo
     }
 
     // Reasoning shortcuts run before composer/editor key handling, so fallback
-    // aliases must yield to any explicit binding on the same main-surface input
+    // bindings must yield to any explicit binding on the same main-surface input
     // path.
-    configured_context_alias_is_used(&global, alias)
-        || configured_context_alias_is_used(&keymap.chat, alias)
-        || configured_context_alias_is_used(&keymap.composer, alias)
-        || configured_context_alias_is_used(&keymap.editor, alias)
-        || configured_context_alias_is_used(&keymap.vim_normal, alias)
-        || configured_context_alias_is_used(&keymap.vim_operator, alias)
-        || configured_context_alias_is_used(&keymap.vim_text_object, alias)
+    configured_context_binding_is_used(&global, binding)
+        || configured_context_binding_is_used(&keymap.chat, binding)
+        || configured_context_binding_is_used(&keymap.composer, binding)
+        || configured_context_binding_is_used(&keymap.editor, binding)
+        || configured_context_binding_is_used(&keymap.vim_normal, binding)
+        || configured_context_binding_is_used(&keymap.vim_operator, binding)
+        || configured_context_binding_is_used(&keymap.vim_text_object, binding)
 }
 
 fn configured_context_alias_is_used(context: &impl Serialize, alias: &str) -> bool {
@@ -2768,6 +2771,23 @@ mod tests {
 
     fn one(spec: &str) -> KeybindingsSpec {
         KeybindingsSpec::One(KeybindingSpec(spec.to_string()))
+    }
+
+    fn one_composer_z_binding(binding: KeyBinding) -> KeybindingsSpec {
+        let (key, modifiers) = binding.parts();
+        assert_eq!(key, KeyCode::Char('z'));
+        let primary_modifier = if modifiers.contains(KeyModifiers::CONTROL) {
+            "ctrl"
+        } else {
+            assert!(modifiers.contains(KeyModifiers::ALT));
+            "alt"
+        };
+        let shift = if modifiers.contains(KeyModifiers::SHIFT) {
+            "-shift"
+        } else {
+            ""
+        };
+        one(&format!("{primary_modifier}{shift}-z"))
     }
 
     fn expect_conflict(keymap: &TuiKeymap, first: &str, second: &str) {
@@ -3012,14 +3032,10 @@ mod tests {
 
     #[test]
     fn undo_defaults_yield_to_existing_editor_bindings() {
-        let (undo, redo) = if cfg!(windows) {
-            ("ctrl-z", "ctrl-shift-z")
-        } else {
-            ("alt-z", "alt-shift-z")
-        };
         let mut keymap = TuiKeymap::default();
-        keymap.editor.move_line_start = Some(one(undo));
-        keymap.editor.move_line_end = Some(one(redo));
+        keymap.editor.move_line_start =
+            Some(one_composer_z_binding(default_composer_undo_binding()));
+        keymap.editor.move_line_end = Some(one_composer_z_binding(default_composer_redo_binding()));
 
         let runtime = RuntimeKeymap::from_config(&keymap).expect("editor bindings should win");
 
