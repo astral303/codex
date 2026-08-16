@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
 
 use codex_config::types::KeybindingSpec;
 use codex_config::types::KeybindingsSpec;
@@ -229,4 +231,30 @@ fn external_edit_is_reversible_but_submission_starts_a_new_history() {
     let (result, _) = composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(result, InputResult::Submitted { .. }));
     assert!(!press(&mut composer, UNDO_KEY));
+}
+
+#[test]
+fn detected_paste_burst_is_one_undo_step() {
+    let (mut composer, _rx) = new_composer();
+    composer.set_disable_paste_burst(false);
+    composer.set_text_content("existing prompt".to_string(), Vec::new(), Vec::new());
+    composer.move_cursor_to_end();
+    let before_paste = composer.snapshot_draft();
+    let now = Instant::now();
+
+    for ch in "界".repeat(17).chars() {
+        composer.handle_input_basic_with_time(
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+            now,
+        );
+    }
+    assert!(composer.is_in_paste_burst());
+    assert!(composer.handle_paste_burst_flush(now + Duration::from_secs(1)));
+    let after_paste = composer.snapshot_draft();
+
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.snapshot_draft(), before_paste);
+    assert!(!press(&mut composer, UNDO_KEY));
+    assert!(press(&mut composer, REDO_KEY));
+    assert_eq!(composer.snapshot_draft(), after_paste);
 }
