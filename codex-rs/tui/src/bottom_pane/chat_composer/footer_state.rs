@@ -37,6 +37,8 @@ pub(super) struct FooterState {
     pub(super) queue_key: Option<ShortcutHint>,
     pub(super) toggle_shortcuts_key: Option<ShortcutHint>,
     pub(super) history_search_key: Option<ShortcutHint>,
+    pub(super) undo_key: Option<ShortcutHint>,
+    pub(super) redo_key: Option<ShortcutHint>,
     pub(super) reasoning_down_key: Option<ShortcutHint>,
     pub(super) reasoning_up_key: Option<ShortcutHint>,
 }

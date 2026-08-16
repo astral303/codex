@@ -266,6 +266,8 @@ define_runtime_action_bindings! {
         toggle_shortcuts,
         history_search_previous,
         history_search_next,
+        undo,
+        redo,
     ],
     "editor" => Editor, editor, editor [
         insert_newline,

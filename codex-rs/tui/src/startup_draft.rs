@@ -28,7 +28,7 @@ use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::ChatComposer;
 use crate::bottom_pane::ChatComposerConfig;
-use crate::bottom_pane::ComposerDraftSnapshot;
+use crate::bottom_pane::StartupDraftSnapshot;
 use crate::history_cell;
 use crate::history_cell::HistoryCell;
 use crate::key_hint;
@@ -262,7 +262,7 @@ impl StartupDraftPump {
     }
 
     /// Preserve the editable draft, its cursor, and any pending large-paste placeholders.
-    pub(crate) fn into_draft(mut self) -> ComposerDraftSnapshot {
+    pub(crate) fn into_draft(mut self) -> StartupDraftSnapshot {
         self.bottom_pane.flush_composer_paste_burst();
         self.bottom_pane.composer_draft_snapshot()
     }
@@ -422,8 +422,14 @@ fn handle_startup_draft_key(bottom_pane: &mut BottomPane, key: KeyEvent) -> io::
         }
     }
 
-    if key_hint::has_ctrl_or_alt(key.modifiers) && !bottom_pane.is_safe_startup_editor_key(key)
-        || key.code == KeyCode::Enter && !bottom_pane.is_safe_startup_editor_key(key)
+    if key_hint::has_ctrl_or_alt(key.modifiers) {
+        if bottom_pane.is_safe_startup_editor_key(key) {
+            bottom_pane.handle_startup_editor_key(key);
+        }
+        return Ok(());
+    }
+
+    if key.code == KeyCode::Enter && !bottom_pane.is_safe_startup_editor_key(key)
         || key
             .modifiers
             .intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)
