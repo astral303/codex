@@ -166,6 +166,16 @@ impl ComposerUndoHistory {
         self.advance_mutation_epoch();
     }
 
+    /// Forget temporary edit records that were reclassified as part of one larger action.
+    pub(super) fn discard_provisional_edits(&mut self, count: usize) {
+        for _ in 0..count {
+            if self.pop_undo().is_none() {
+                break;
+            }
+        }
+        self.advance_mutation_epoch();
+    }
+
     fn push_undo_if_it_fits(&mut self, draft: EditableDraft) {
         let draft = StoredDraft::new(draft);
         if draft.retained_bytes > self.max_retained_bytes {
