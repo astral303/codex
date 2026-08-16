@@ -4,7 +4,7 @@
 //! the intent; normal submission parsing runs once the session and protected-input gates are ready.
 
 use super::*;
-use crate::bottom_pane::ComposerDraftSnapshot;
+use crate::bottom_pane::StartupDraftSnapshot;
 
 impl ChatWidget {
     /// Keep recovery current while startup still owns an unsent, handed-off draft.
@@ -17,7 +17,7 @@ impl ChatWidget {
     /// Restore startup text first, then submit its confirmed contents once the session is ready.
     pub(crate) fn restore_startup_input_when_ready(
         &mut self,
-        pending_draft: &mut Option<ComposerDraftSnapshot>,
+        pending_draft: &mut Option<StartupDraftSnapshot>,
         pending_submission: &mut bool,
     ) {
         let had_draft = pending_draft.is_some();
