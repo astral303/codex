@@ -2,8 +2,8 @@
 
 use std::collections::HashSet;
 
-use crate::bottom_pane::ComposerDraftSnapshot;
 use crate::bottom_pane::KillBufferSnapshot;
+use crate::bottom_pane::StartupDraftSnapshot;
 
 use super::user_messages::remap_colliding_paste_placeholders;
 use super::*;
@@ -18,7 +18,7 @@ impl ChatWidget {
     }
 
     /// Restore the exact draft entered before the fully initialized composer became available.
-    pub(crate) fn restore_startup_draft(&mut self, draft: ComposerDraftSnapshot) {
+    pub(crate) fn restore_startup_draft(&mut self, draft: StartupDraftSnapshot) {
         let existing_draft = self.bottom_pane.composer_draft_snapshot();
         let existing_cursor = existing_draft.cursor;
         let existing_message = UserMessage {
@@ -104,7 +104,7 @@ impl ChatWidget {
     /// Transfer startup input only after protected views and required sandbox setup finish.
     pub(crate) fn restore_startup_draft_when_ready(
         &mut self,
-        pending_draft: &mut Option<ComposerDraftSnapshot>,
+        pending_draft: &mut Option<StartupDraftSnapshot>,
     ) {
         if self.has_active_view()
             || self

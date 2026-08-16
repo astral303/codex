@@ -344,7 +344,7 @@ fn question_wrapped_other_shares_the_text_indent() {
     insta::assert_snapshot!("question_capped_other", buffer_text(&buffer));
     editor.select_option(/*index*/ 0);
     assert!(editor.other_label().len() <= 128);
-    editor.state.pending[0].draft.text = format!("a{}", "\u{301}".repeat(10_000));
+    editor.state.pending[0].draft.content.text = format!("a{}", "\u{301}".repeat(10_000));
     assert!(editor.other_label().len() <= 512);
 }
 
