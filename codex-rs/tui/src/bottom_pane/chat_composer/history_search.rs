@@ -201,6 +201,7 @@ impl ChatComposer {
                     self.history.reset_search();
                     self.footer.mode = reset_mode_after_activity(self.footer.mode);
                     self.move_cursor_to_end();
+                    self.establish_undo_baseline();
                 }
                 (InputResult::None, true)
             }

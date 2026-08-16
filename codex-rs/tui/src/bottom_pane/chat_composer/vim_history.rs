@@ -26,19 +26,19 @@ pub(super) struct VimHistory {
 
 impl ComposerDraft {
     fn vim_history_bytes(&self) -> usize {
-        let mut bytes = self.text.len()
-            + self.text_elements.len()
+        let mut bytes = self.content.text.len()
+            + self.content.text_elements.len()
                 * std::mem::size_of::<codex_protocol::user_input::TextElement>();
-        for path in &self.local_image_paths {
+        for path in &self.content.local_image_paths {
             bytes += path.as_os_str().len();
         }
-        for url in &self.remote_image_urls {
+        for url in &self.content.remote_image_urls {
             bytes += url.len();
         }
-        for binding in &self.mention_bindings {
+        for binding in &self.content.mention_bindings {
             bytes += binding.mention.len() + binding.path.len();
         }
-        for (placeholder, pasted) in &self.pending_pastes {
+        for (placeholder, pasted) in &self.content.pending_pastes {
             bytes += placeholder.len() + pasted.len();
         }
         bytes
@@ -199,12 +199,12 @@ impl ChatComposer {
         let Some(snapshot) = self.vim_history.pending.take() else {
             return;
         };
-        if snapshot.text == self.current_text()
-            && snapshot.text_elements == self.current_text_elements()
-            && snapshot.pending_pastes == self.draft.pending_pastes
-            && snapshot.local_image_paths == self.attachments.local_image_paths()
-            && snapshot.remote_image_urls == self.attachments.remote_image_urls()
-            && snapshot.mention_bindings == self.snapshot_mention_bindings()
+        if snapshot.content.text == self.current_text()
+            && snapshot.content.text_elements == self.current_text_elements()
+            && snapshot.content.pending_pastes == self.draft.pending_pastes
+            && snapshot.content.local_image_paths == self.attachments.local_image_paths()
+            && snapshot.content.remote_image_urls == self.attachments.remote_image_urls()
+            && snapshot.content.mention_bindings == self.snapshot_mention_bindings()
         {
             return;
         }

@@ -16,7 +16,7 @@ impl AsyncQuestions {
     pub(super) fn other_label(&self) -> String {
         self.current_answer()
             .filter(|_| !self.other_selected())
-            .map(|answer| answer.draft.text.trim())
+            .map(|answer| answer.draft.content.text.trim())
             .filter(|text| !text.is_empty())
             .map(|text| &text[..text.floor_char_boundary(512)])
             .map(|text| crate::text_formatting::truncate_text(text, /*max_graphemes*/ 128))
