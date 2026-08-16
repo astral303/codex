@@ -5,33 +5,34 @@
 
 use super::super::AttachmentState;
 use super::super::ChatComposer;
-use super::super::ComposerDraftSnapshot;
+use super::super::StartupDraftSnapshot;
 use super::super::TextArea;
 use super::VimPersistentState;
 
 impl ChatComposer {
-    pub(crate) fn draft_snapshot(&self) -> ComposerDraftSnapshot {
+    pub(crate) fn draft_snapshot(&self) -> StartupDraftSnapshot {
         let draft = self.history_search.as_ref().map_or_else(
             || self.snapshot_draft(),
             |search| search.original_draft.clone(),
         );
+        let content = draft.content;
         let mut attachments = AttachmentState::default();
         let mut textarea = TextArea::new();
-        attachments.set_remote_image_urls(draft.remote_image_urls.clone(), &mut textarea);
-        attachments.reset_local_images(draft.local_image_paths, &mut textarea);
-        ComposerDraftSnapshot {
+        attachments.set_remote_image_urls(content.remote_image_urls.clone(), &mut textarea);
+        attachments.reset_local_images(content.local_image_paths, &mut textarea);
+        StartupDraftSnapshot {
             vim_normal_mode: self.draft.textarea.is_vim_normal_mode(),
-            text: draft.text,
+            text: content.text,
             shell_mode: self
                 .config
                 .shell_commands_enabled
-                .then_some(draft.is_bash_mode),
+                .then_some(content.is_bash_mode),
             cursor: draft.cursor,
-            text_elements: draft.text_elements,
+            text_elements: content.text_elements,
             local_images: attachments.local_images,
-            remote_image_urls: draft.remote_image_urls,
-            mention_bindings: draft.mention_bindings,
-            pending_pastes: draft.pending_pastes,
+            remote_image_urls: content.remote_image_urls,
+            mention_bindings: content.mention_bindings,
+            pending_pastes: content.pending_pastes,
             startup_local_history: self.history.startup_local_history().to_vec(),
             last_composer_activity_at: None,
             sparkle_draft: self.sparkle.draft.get(),

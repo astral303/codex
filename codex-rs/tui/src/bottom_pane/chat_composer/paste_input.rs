@@ -26,11 +26,25 @@ impl ChatComposer {
         text: &str,
         shell_prefix: ShellPrefixHandling,
     ) {
+        let started_vim_edit = self.begin_direct_vim_edit();
+        let before_edit = self.snapshot_draft();
+        self.insert_str_at_target_without_history(target, text, shell_prefix);
+        self.record_edit_since(before_edit);
+        if started_vim_edit {
+            self.finish_vim_edit();
+        }
+    }
+
+    pub(super) fn insert_str_at_target_without_history(
+        &mut self,
+        target: EditTarget,
+        text: &str,
+        shell_prefix: ShellPrefixHandling,
+    ) {
         self.draft.skill_completion_space = None;
         if !text.is_empty() && self.sparkle.draft.get() == sparkle::SparkleDraft::Untouched {
             self.dismiss_sparkle();
         }
-        let started_vim_edit = self.begin_direct_vim_edit();
         let elements_before = target
             .replaces_text()
             .then(|| self.draft.textarea.element_payloads());
@@ -45,13 +59,10 @@ impl ChatComposer {
             self.sync_bash_mode_from_text();
         }
         self.sync_popups();
-        if started_vim_edit {
-            self.finish_vim_edit();
-        }
     }
 
     /// Include accepted but unflushed keys without changing live paste detection.
-    pub(crate) fn recovery_snapshot(&self) -> ComposerDraftSnapshot {
+    pub(crate) fn recovery_snapshot(&self) -> StartupDraftSnapshot {
         let mut snapshot = self.draft_snapshot();
         let pending = self.draft.paste_burst.clone().flush_pending();
         if matches!(pending, FlushResult::None) {
@@ -206,6 +217,17 @@ impl ChatComposer {
         pasted: String,
         shell_prefix: ShellPrefixHandling,
     ) -> bool {
+        let before_edit = self.snapshot_draft();
+        let needs_redraw = self.apply_paste_with_shell_prefix_without_history(pasted, shell_prefix);
+        self.record_edit_since(before_edit);
+        needs_redraw
+    }
+
+    fn apply_paste_with_shell_prefix_without_history(
+        &mut self,
+        pasted: String,
+        shell_prefix: ShellPrefixHandling,
+    ) -> bool {
         self.draft.skill_completion_space = None;
         let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
         let pasted = sanitize_user_text(pasted.into());
@@ -254,7 +276,7 @@ impl ChatComposer {
             let cursor = self.draft.textarea.cursor();
             self.draft.textarea.insert_str_at(cursor, " ");
         } else {
-            self.insert_str_at_target(target, &pasted, shell_prefix);
+            self.insert_str_at_target_without_history(target, &pasted, shell_prefix);
         }
         if is_blockquote {
             let textarea = &mut self.draft.textarea;

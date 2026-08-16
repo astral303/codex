@@ -12,10 +12,10 @@ use pretty_assertions::assert_eq;
 
 use super::super::super::chat_composer_history::HistoryEntry;
 use super::super::ChatComposer;
-use super::super::ComposerDraftSnapshot;
 use super::super::InputResult;
 use super::super::LARGE_PASTE_CHAR_THRESHOLD;
 use super::super::PasteBurst;
+use super::super::StartupDraftSnapshot;
 use super::super::tests::new_test_composer;
 use super::super::tests::snapshot_composer_state_with_width;
 use crate::keymap::RuntimeKeymap;
@@ -593,7 +593,7 @@ fn undo_and_redo_restore_deleted_image_attachment() {
     let _ = composer.handle_key_event(KeyEvent::from(KeyCode::Backspace));
     assert_eq!(
         composer.draft_snapshot(),
-        ComposerDraftSnapshot {
+        StartupDraftSnapshot {
             vim_normal_mode: false,
             ..before.clone()
         }

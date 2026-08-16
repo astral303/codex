@@ -69,6 +69,8 @@ fn bindings(props: &FooterProps) -> [(&'static str, Vec<Entry>); 3] {
         Entry::key(paste, "Paste image"),
         Entry::hint(hints.external_editor, "External editor"),
         Entry::hint(hints.history_search, "Search history"),
+        Entry::hint(hints.undo, "Undo"),
+        Entry::hint(hints.redo, "Redo"),
         Entry {
             keys: [hints.edit_previous, None],
             action: "Edit last message",

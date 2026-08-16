@@ -5,10 +5,10 @@ use std::collections::VecDeque;
 
 use codex_protocol::models::local_image_label_text;
 
-use crate::bottom_pane::ComposerDraftSnapshot;
 use crate::bottom_pane::KillBufferSnapshot;
 use crate::bottom_pane::MentionUsage;
 use crate::bottom_pane::ShellPrefixHandling;
+use crate::bottom_pane::StartupDraftSnapshot;
 
 use super::user_messages::remap_colliding_paste_placeholders;
 use super::*;
@@ -26,7 +26,7 @@ impl ChatWidget {
         self.bottom_pane.restore_kill_buffer_snapshot(snapshot);
     }
 
-    pub(crate) fn composer_draft_snapshot(&mut self) -> ComposerDraftSnapshot {
+    pub(crate) fn composer_draft_snapshot(&mut self) -> StartupDraftSnapshot {
         self.bottom_pane.flush_pending_composer_input();
         let mut draft = self.bottom_pane.composer_draft_snapshot();
         // This snapshot comes from an active host, where disabled shell commands
@@ -36,7 +36,7 @@ impl ChatWidget {
     }
 
     /// Continue an active Cloud-switch draft without undoing an accepted Vim Escape.
-    pub(crate) fn restore_cloud_switch_draft(&mut self, draft: ComposerDraftSnapshot) {
+    pub(crate) fn restore_cloud_switch_draft(&mut self, draft: StartupDraftSnapshot) {
         let continue_vim_normal_mode = draft.vim_normal_mode;
         self.restore_startup_draft(draft);
         if continue_vim_normal_mode {
@@ -45,7 +45,7 @@ impl ChatWidget {
     }
 
     /// Restore the exact draft entered before the fully initialized composer became available.
-    pub(crate) fn restore_startup_draft(&mut self, draft: ComposerDraftSnapshot) {
+    pub(crate) fn restore_startup_draft(&mut self, draft: StartupDraftSnapshot) {
         self.bottom_pane
             .inherit_startup_sparkle(draft.sparkle_draft);
         let existing_draft = self.bottom_pane.composer_draft_snapshot();
@@ -137,7 +137,7 @@ impl ChatWidget {
     /// Transfer startup input only after protected views and required sandbox setup finish.
     pub(crate) fn restore_startup_draft_when_ready(
         &mut self,
-        pending_draft: &mut Option<ComposerDraftSnapshot>,
+        pending_draft: &mut Option<StartupDraftSnapshot>,
     ) {
         if let Some(draft) = pending_draft.as_ref() {
             self.bottom_pane

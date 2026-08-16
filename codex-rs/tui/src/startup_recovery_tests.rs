@@ -7,8 +7,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use pretty_assertions::assert_eq;
 
-fn snapshot(text: &str) -> ComposerDraftSnapshot {
-    ComposerDraftSnapshot {
+fn snapshot(text: &str) -> StartupDraftSnapshot {
+    StartupDraftSnapshot {
         vim_normal_mode: false,
         text: text.to_string(),
         shell_mode: None,
