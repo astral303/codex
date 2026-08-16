@@ -62,6 +62,16 @@ fn undo_walks_typing_then_explicit_paste_in_reverse_order() {
 }
 
 #[test]
+fn key_dispatch_does_not_record_a_nested_edit_twice() {
+    let (mut composer, _rx) = new_composer();
+
+    assert!(press(&mut composer, KeyCode::Char('x')));
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.current_text(), "");
+    assert!(!press(&mut composer, UNDO_KEY));
+}
+
+#[test]
 fn ctrl_c_undo_restores_the_complete_draft_and_redo_clears_it() {
     let (mut composer, _rx) = new_composer();
     composer.set_text_content("!echo ".to_string(), Vec::new(), Vec::new());
