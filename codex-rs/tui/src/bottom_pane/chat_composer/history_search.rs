@@ -31,7 +31,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 
-use super::super::chat_composer_history::HistorySearchDirection;
+use super::super::chat_composer_history::HistoryDirection;
 use super::super::chat_composer_history::HistorySearchResult;
 use super::super::footer::footer_height;
 use super::super::footer::reset_mode_after_activity;
@@ -139,14 +139,14 @@ impl ChatComposer {
         if Self::is_history_search_key(&key_event, &self.history_search_previous_keys)
             || matches!(key_event.code, KeyCode::Up)
         {
-            let result = self.history_search_in_direction(HistorySearchDirection::Older);
+            let result = self.history_search_in_direction(HistoryDirection::Older);
             return (result, true);
         }
 
         if Self::is_history_search_forward_key(&key_event, &self.history_search_next_keys)
             || matches!(key_event.code, KeyCode::Down)
         {
-            let result = self.history_search_in_direction(HistorySearchDirection::Newer);
+            let result = self.history_search_in_direction(HistoryDirection::Newer);
             return (result, true);
         }
 
@@ -231,7 +231,7 @@ impl ChatComposer {
         }
     }
 
-    fn history_search_in_direction(&mut self, direction: HistorySearchDirection) -> InputResult {
+    fn history_search_in_direction(&mut self, direction: HistoryDirection) -> InputResult {
         let Some((query, original_draft)) = self
             .history_search
             .as_ref()
@@ -279,7 +279,7 @@ impl ChatComposer {
         }
         let result = self.history.search(
             &query,
-            HistorySearchDirection::Older,
+            HistoryDirection::Older,
             /*restart*/ true,
             &self.app_event_tx,
         );

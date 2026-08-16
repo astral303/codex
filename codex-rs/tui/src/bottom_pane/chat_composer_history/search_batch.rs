@@ -1,6 +1,6 @@
 use super::ChatComposerHistory;
+use super::HistoryDirection;
 use super::HistoryEntry;
-use super::HistorySearchDirection;
 use super::HistorySearchResult;
 use super::MAX_BATCH_READ_RETRIES;
 use super::PendingHistorySearch;
@@ -60,7 +60,7 @@ impl ChatComposerHistory {
                 app_event_tx,
             )
         } else {
-            self.exhausted_search_result(HistorySearchDirection::Older, boundary_if_exhausted)
+            self.exhausted_search_result(HistoryDirection::Older, boundary_if_exhausted)
         };
         Some(result)
     }
@@ -131,8 +131,7 @@ impl ChatComposerHistory {
         app_event_tx: &AppEventSender,
     ) -> HistorySearchResult {
         let Some(next_offset) = offset.checked_sub(1) else {
-            return self
-                .exhausted_search_result(HistorySearchDirection::Older, boundary_if_exhausted);
+            return self.exhausted_search_result(HistoryDirection::Older, boundary_if_exhausted);
         };
         self.advance_older_search_with_batches_from(
             HistoryBatchCursor::new(next_offset),
@@ -170,7 +169,7 @@ impl ChatComposerHistory {
 
             let Some(next_offset) = offset.checked_sub(1) else {
                 return self
-                    .exhausted_search_result(HistorySearchDirection::Older, boundary_if_exhausted);
+                    .exhausted_search_result(HistoryDirection::Older, boundary_if_exhausted);
             };
             offset = next_offset;
             cursor = HistoryBatchCursor::new(offset);
@@ -184,8 +183,7 @@ impl ChatComposerHistory {
         app_event_tx: &AppEventSender,
     ) -> HistorySearchResult {
         let (Some(thread_id), Some(log_id)) = (self.thread_id, self.persistent_log_id) else {
-            return self
-                .exhausted_search_result(HistorySearchDirection::Older, boundary_if_exhausted);
+            return self.exhausted_search_result(HistoryDirection::Older, boundary_if_exhausted);
         };
         if let Some(search) = self.search.as_mut() {
             search.awaiting = Some(PendingHistorySearch::Batch {
