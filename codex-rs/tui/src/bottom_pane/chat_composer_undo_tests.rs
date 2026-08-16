@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::time::Duration;
 use std::time::Instant;
 
 use codex_config::types::KeybindingSpec;
@@ -17,6 +16,7 @@ use crate::app_event::AppEvent;
 use crate::bottom_pane::AppEventSender;
 const UNDO_KEY: KeyCode = KeyCode::F(2);
 const REDO_KEY: KeyCode = KeyCode::F(3);
+const MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT: &str = "界\u{3000}界";
 
 fn new_composer() -> (ChatComposer, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = unbounded_channel();
@@ -242,14 +242,15 @@ fn detected_paste_burst_is_one_undo_step() {
     let before_paste = composer.snapshot_draft();
     let now = Instant::now();
 
-    for ch in "界".repeat(17).chars() {
-        composer.handle_input_basic_with_time(
+    // Non-ASCII whitespace lets the existing detector recognize the minimum-length burst.
+    for ch in MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT.chars() {
+        composer.handle_input_basic_with_time_and_undo_history(
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
             now,
         );
     }
     assert!(composer.is_in_paste_burst());
-    assert!(composer.handle_paste_burst_flush(now + Duration::from_secs(1)));
+    assert!(composer.handle_paste_burst_flush(now + PasteBurst::recommended_active_flush_delay()));
     let after_paste = composer.snapshot_draft();
 
     assert!(press(&mut composer, UNDO_KEY));
@@ -257,4 +258,33 @@ fn detected_paste_burst_is_one_undo_step() {
     assert!(!press(&mut composer, UNDO_KEY));
     assert!(press(&mut composer, REDO_KEY));
     assert_eq!(composer.snapshot_draft(), after_paste);
+}
+
+#[test]
+fn disabled_paste_burst_keeps_plain_keys_as_individual_undo_steps() {
+    let (mut composer, _rx) = new_composer();
+    let now = Instant::now();
+
+    for ch in MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT.chars() {
+        composer.handle_input_basic_with_time_and_undo_history(
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+            now,
+        );
+    }
+    assert!(!composer.is_in_paste_burst());
+    assert_eq!(
+        composer.current_text(),
+        MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT
+    );
+
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(
+        composer.current_text(),
+        MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT
+            .chars()
+            .take(MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT.chars().count() - 1)
+            .collect::<String>()
+    );
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.current_text(), "界");
 }
