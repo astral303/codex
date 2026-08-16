@@ -102,7 +102,8 @@ pub(super) struct ComposerUndoHistory {
     retained_bytes: usize,
     max_entries: usize,
     max_retained_bytes: usize,
-    revision: u64,
+    /// Changes whenever an operation mutates either history stack.
+    mutation_epoch: u64,
 }
 
 impl Default for ComposerUndoHistory {
@@ -119,12 +120,12 @@ impl ComposerUndoHistory {
             retained_bytes: 0,
             max_entries,
             max_retained_bytes,
-            revision: 0,
+            mutation_epoch: 0,
         }
     }
 
-    pub(super) fn revision(&self) -> u64 {
-        self.revision
+    pub(super) fn mutation_epoch(&self) -> u64 {
+        self.mutation_epoch
     }
 
     /// Record the state immediately before one content-changing user action.
@@ -133,14 +134,14 @@ impl ComposerUndoHistory {
         let before_edit = StoredDraft::new(before_edit);
         if self.max_entries == 0 || before_edit.retained_bytes > self.max_retained_bytes {
             self.clear_stacks();
-            self.bump_revision();
+            self.advance_mutation_epoch();
             return false;
         }
 
         self.retained_bytes += before_edit.retained_bytes;
         self.undo.push_back(before_edit);
         self.trim_to_limits();
-        self.bump_revision();
+        self.advance_mutation_epoch();
         true
     }
 
@@ -148,7 +149,7 @@ impl ComposerUndoHistory {
         let target = self.pop_undo()?;
         self.push_redo_if_it_fits(current);
         self.trim_to_limits();
-        self.bump_revision();
+        self.advance_mutation_epoch();
         Some(target.draft)
     }
 
@@ -156,14 +157,13 @@ impl ComposerUndoHistory {
         let target = self.pop_redo()?;
         self.push_undo_if_it_fits(current);
         self.trim_to_limits();
-        self.bump_revision();
+        self.advance_mutation_epoch();
         Some(target.draft)
     }
 
-    /// Establish a new draft root that undo and redo must not cross.
     pub(super) fn clear(&mut self) {
         self.clear_stacks();
-        self.bump_revision();
+        self.advance_mutation_epoch();
     }
 
     fn push_undo_if_it_fits(&mut self, draft: EditableDraft) {
@@ -188,13 +188,13 @@ impl ComposerUndoHistory {
 
     fn pop_undo(&mut self) -> Option<StoredDraft> {
         let draft = self.undo.pop_back()?;
-        self.retained_bytes = self.retained_bytes.saturating_sub(draft.retained_bytes);
+        self.subtract_retained_bytes(draft.retained_bytes);
         Some(draft)
     }
 
     fn pop_redo(&mut self) -> Option<StoredDraft> {
         let draft = self.redo.pop_back()?;
-        self.retained_bytes = self.retained_bytes.saturating_sub(draft.retained_bytes);
+        self.subtract_retained_bytes(draft.retained_bytes);
         Some(draft)
     }
 
@@ -214,32 +214,48 @@ impl ComposerUndoHistory {
             let Some(removed) = removed else {
                 break;
             };
-            self.retained_bytes = self.retained_bytes.saturating_sub(removed.retained_bytes);
+            self.subtract_retained_bytes(removed.retained_bytes);
         }
     }
 
     fn clear_stacks(&mut self) {
+        let removed_bytes = self
+            .undo
+            .iter()
+            .chain(&self.redo)
+            .map(|draft| draft.retained_bytes)
+            .sum();
+        self.subtract_retained_bytes(removed_bytes);
+        assert_eq!(
+            self.retained_bytes, 0,
+            "composer undo history retained-byte accounting mismatch"
+        );
         self.undo.clear();
         self.redo.clear();
-        self.retained_bytes = 0;
     }
 
     fn clear_undo(&mut self) {
-        self.retained_bytes = self
-            .retained_bytes
-            .saturating_sub(self.undo.iter().map(|draft| draft.retained_bytes).sum());
+        let removed_bytes = self.undo.iter().map(|draft| draft.retained_bytes).sum();
+        self.subtract_retained_bytes(removed_bytes);
         self.undo.clear();
     }
 
     fn clear_redo(&mut self) {
-        self.retained_bytes = self
-            .retained_bytes
-            .saturating_sub(self.redo.iter().map(|draft| draft.retained_bytes).sum());
+        let removed_bytes = self.redo.iter().map(|draft| draft.retained_bytes).sum();
+        self.subtract_retained_bytes(removed_bytes);
         self.redo.clear();
     }
 
-    fn bump_revision(&mut self) {
-        self.revision = self.revision.wrapping_add(1);
+    fn subtract_retained_bytes(&mut self, removed_bytes: usize) {
+        assert!(
+            self.retained_bytes >= removed_bytes,
+            "composer undo history retained-byte accounting underflow"
+        );
+        self.retained_bytes -= removed_bytes;
+    }
+
+    fn advance_mutation_epoch(&mut self) {
+        self.mutation_epoch = self.mutation_epoch.wrapping_add(1);
     }
 }
 
