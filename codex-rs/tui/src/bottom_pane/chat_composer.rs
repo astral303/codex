@@ -2351,6 +2351,9 @@ impl ChatComposer {
                             if grab.grabbed.is_empty()
                                 || self.draft.textarea.retract_paste_burst(grab.start_byte)
                             {
+                                self.undo_history
+                                    .discard_provisional_edits(retro_chars as usize);
+                                // seed the paste burst buffer with everything (grabbed + new)
                                 self.draft.paste_burst.append_char_to_buffer(ch, now);
                                 return (InputResult::None, true);
                             }
@@ -3957,6 +3960,8 @@ impl ChatComposer {
                             if grab.grabbed.is_empty()
                                 || self.draft.textarea.retract_paste_burst(grab.start_byte)
                             {
+                                self.undo_history
+                                    .discard_provisional_edits(retro_chars as usize);
                                 self.draft.paste_burst.append_char_to_buffer(ch, now);
                                 return (InputResult::None, true);
                             }
