@@ -145,6 +145,8 @@ define_keymap_actions! {
         toggle_shortcuts => "Show or hide the composer shortcut overlay.",
         history_search_previous => "Open history search or move to the previous match.",
         history_search_next => "Move to the next history search match.",
+        undo => "Undo the most recent draft edit.",
+        redo => "Redo the most recently undone draft edit.",
     }
     editor "Editor" {
         insert_newline => "Insert a newline in the editor.",
