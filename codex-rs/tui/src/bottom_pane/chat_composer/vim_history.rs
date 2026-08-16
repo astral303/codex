@@ -26,20 +26,20 @@ pub(super) struct VimHistory {
 
 impl ComposerDraft {
     fn vim_history_bytes(&self) -> usize {
-        let mut bytes = self.text.len()
-            + self.text_elements.len()
+        let mut bytes = self.content.text.len()
+            + self.content.text_elements.len()
                 * std::mem::size_of::<codex_protocol::user_input::TextElement>();
-        bytes += self.mention_ranges.len() * std::mem::size_of::<std::ops::Range<usize>>();
-        for path in &self.local_image_paths {
+        bytes += self.content.mention_ranges.len() * std::mem::size_of::<std::ops::Range<usize>>();
+        for path in &self.content.local_image_paths {
             bytes += path.as_os_str().len();
         }
-        for url in &self.remote_image_urls {
+        for url in &self.content.remote_image_urls {
             bytes += url.len();
         }
-        for binding in &self.mention_bindings {
+        for binding in &self.content.mention_bindings {
             bytes += binding.mention.len() + binding.path.len();
         }
-        for (placeholder, pasted) in &self.pending_pastes {
+        for (placeholder, pasted) in &self.content.pending_pastes {
             bytes += placeholder.len() + pasted.len();
         }
         bytes
@@ -200,7 +200,7 @@ impl ChatComposer {
         let Some(snapshot) = self.vim_history.pending.take() else {
             return;
         };
-        if snapshot.text == self.current_text() {
+        if snapshot.content.text == self.current_text() {
             let mut current = self.snapshot_draft();
             current.cursor = snapshot.cursor;
             if snapshot == current {

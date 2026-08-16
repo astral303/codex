@@ -9,15 +9,15 @@ use std::future::Future;
 use std::io::Write;
 
 use crate::bottom_pane::ChatComposer;
-use crate::bottom_pane::ComposerDraftSnapshot;
 use crate::bottom_pane::InputResult;
+use crate::bottom_pane::StartupDraftSnapshot;
 
 tokio::task_local! {
     static DRAFT: RefCell<Option<RecoveryDraft>>;
 }
 
 struct RecoveryDraft {
-    snapshot: ComposerDraftSnapshot,
+    snapshot: StartupDraftSnapshot,
     stage: RecoveryStage,
 }
 
@@ -34,7 +34,7 @@ pub(crate) async fn scope<F: Future>(future: F) -> F::Output {
 }
 
 /// Replace the single recovery copy after input changes or before handing the draft off.
-pub(crate) fn remember(snapshot: ComposerDraftSnapshot) {
+pub(crate) fn remember(snapshot: StartupDraftSnapshot) {
     let _ = DRAFT.try_with(|draft| {
         *draft.borrow_mut() = Some(RecoveryDraft {
             snapshot,
@@ -44,7 +44,7 @@ pub(crate) fn remember(snapshot: ComposerDraftSnapshot) {
 }
 
 /// Track the merged destination only once startup has transferred its draft into ChatWidget.
-pub(crate) fn handed_off(snapshot: impl FnOnce() -> ComposerDraftSnapshot) {
+pub(crate) fn handed_off(snapshot: impl FnOnce() -> StartupDraftSnapshot) {
     let _ = DRAFT.try_with(|draft| {
         if let Some(draft) = draft.borrow_mut().as_mut() {
             draft.snapshot = snapshot();
@@ -54,7 +54,7 @@ pub(crate) fn handed_off(snapshot: impl FnOnce() -> ComposerDraftSnapshot) {
 }
 
 /// Refresh pending recovery after local edits without retaining any post-startup input.
-pub(crate) fn refresh_after_handoff(snapshot: impl FnOnce() -> ComposerDraftSnapshot) {
+pub(crate) fn refresh_after_handoff(snapshot: impl FnOnce() -> StartupDraftSnapshot) {
     let _ = DRAFT.try_with(|draft| {
         if let Some(draft) = draft.borrow_mut().as_mut()
             && matches!(draft.stage, RecoveryStage::HandedOff)
