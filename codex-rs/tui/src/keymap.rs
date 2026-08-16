@@ -147,7 +147,7 @@ pub(crate) struct ComposerKeymap {
     pub(crate) redo: Vec<KeyBinding>,
 }
 
-fn default_composer_history_modifiers() -> KeyModifiers {
+fn default_composer_undo_redo_modifiers() -> KeyModifiers {
     if cfg!(windows) {
         KeyModifiers::CONTROL
     } else {
@@ -156,11 +156,11 @@ fn default_composer_history_modifiers() -> KeyModifiers {
 }
 
 pub(crate) fn default_composer_undo_binding() -> KeyBinding {
-    KeyBinding::new(KeyCode::Char('z'), default_composer_history_modifiers())
+    KeyBinding::new(KeyCode::Char('z'), default_composer_undo_redo_modifiers())
 }
 
 pub(crate) fn default_composer_redo_binding() -> KeyBinding {
-    let modifiers = default_composer_history_modifiers() | KeyModifiers::SHIFT;
+    let modifiers = default_composer_undo_redo_modifiers() | KeyModifiers::SHIFT;
     KeyBinding::new(KeyCode::Char('z'), modifiers)
 }
 
@@ -622,19 +622,17 @@ impl RuntimeKeymap {
                     || configured_context_alias_is_used(&keymap.approval, alias)
             });
         let undo_default_is_shadowed = keymap.composer.undo.is_none()
-            && configured_main_surface_alias_is_used(
-                keymap,
-                if cfg!(windows) { "ctrl-z" } else { "alt-z" },
-            );
+            && defaults
+                .composer
+                .undo
+                .iter()
+                .any(|binding| configured_main_surface_binding_is_used(keymap, *binding));
         let redo_default_is_shadowed = keymap.composer.redo.is_none()
-            && configured_main_surface_alias_is_used(
-                keymap,
-                if cfg!(windows) {
-                    "ctrl-shift-z"
-                } else {
-                    "alt-shift-z"
-                },
-            );
+            && defaults
+                .composer
+                .redo
+                .iter()
+                .any(|binding| configured_main_surface_binding_is_used(keymap, *binding));
         let app = AppKeymap {
             open_agents: resolve_bindings(
                 keymap.global.open_agents.as_ref(),
@@ -2291,7 +2289,18 @@ fn configured_bindings_to_preserve<const N: usize>(
     configured_bindings
 }
 
+fn configured_main_surface_binding_is_used(keymap: &TuiKeymap, binding: KeyBinding) -> bool {
+    configured_main_surface_contains(keymap, |value| parse_keybinding(value) == Some(binding))
+}
+
 fn configured_main_surface_alias_is_used(keymap: &TuiKeymap, alias: &str) -> bool {
+    configured_main_surface_contains(keymap, |value| value == alias)
+}
+
+fn configured_main_surface_contains(
+    keymap: &TuiKeymap,
+    binding_matches: impl Copy + Fn(&str) -> bool,
+) -> bool {
     let mut global = keymap.global.clone();
     if keymap.composer.submit.is_some() {
         global.submit = None;
@@ -2304,33 +2313,43 @@ fn configured_main_surface_alias_is_used(keymap: &TuiKeymap, alias: &str) -> boo
     }
 
     // Reasoning shortcuts run before composer/editor key handling, so fallback
-    // aliases must yield to any explicit binding on the same main-surface input
+    // bindings must yield to any explicit binding on the same main-surface input
     // path.
-    configured_context_alias_is_used(&global, alias)
-        || configured_context_alias_is_used(&keymap.chat, alias)
-        || configured_context_alias_is_used(&keymap.composer, alias)
-        || configured_context_alias_is_used(&keymap.editor, alias)
-        || configured_context_alias_is_used(&keymap.vim_normal, alias)
-        || configured_context_alias_is_used(&keymap.vim_operator, alias)
-        || configured_context_alias_is_used(&keymap.vim_text_object, alias)
+    configured_context_contains(&global, binding_matches)
+        || configured_context_contains(&keymap.chat, binding_matches)
+        || configured_context_contains(&keymap.composer, binding_matches)
+        || configured_context_contains(&keymap.editor, binding_matches)
+        || configured_context_contains(&keymap.vim_normal, binding_matches)
+        || configured_context_contains(&keymap.vim_operator, binding_matches)
+        || configured_context_contains(&keymap.vim_text_object, binding_matches)
 }
 
 fn configured_context_alias_is_used(context: &impl Serialize, alias: &str) -> bool {
+    configured_context_contains(context, |value| value == alias)
+}
+
+fn configured_context_contains(
+    context: &impl Serialize,
+    binding_matches: impl Copy + Fn(&str) -> bool,
+) -> bool {
     let Ok(value) = serde_json::to_value(context) else {
         return false;
     };
-    keymap_value_contains_alias(&value, alias)
+    keymap_value_contains(&value, binding_matches)
 }
 
-fn keymap_value_contains_alias(value: &serde_json::Value, alias: &str) -> bool {
+fn keymap_value_contains(
+    value: &serde_json::Value,
+    binding_matches: impl Copy + Fn(&str) -> bool,
+) -> bool {
     match value {
-        serde_json::Value::String(value) => value == alias,
+        serde_json::Value::String(value) => binding_matches(value),
         serde_json::Value::Array(values) => values
             .iter()
-            .any(|value| keymap_value_contains_alias(value, alias)),
+            .any(|value| keymap_value_contains(value, binding_matches)),
         serde_json::Value::Object(values) => values
             .values()
-            .any(|value| keymap_value_contains_alias(value, alias)),
+            .any(|value| keymap_value_contains(value, binding_matches)),
         serde_json::Value::Bool(_) | serde_json::Value::Number(_) | serde_json::Value::Null => {
             false
         }
@@ -2443,6 +2462,23 @@ mod tests {
 
     fn one(spec: &str) -> KeybindingsSpec {
         KeybindingsSpec::One(KeybindingSpec(spec.to_string()))
+    }
+
+    fn one_composer_z_binding(binding: KeyBinding) -> KeybindingsSpec {
+        let (key, modifiers) = binding.parts();
+        assert_eq!(key, KeyCode::Char('z'));
+        let primary_modifier = if modifiers.contains(KeyModifiers::CONTROL) {
+            "ctrl"
+        } else {
+            assert!(modifiers.contains(KeyModifiers::ALT));
+            "alt"
+        };
+        let shift = if modifiers.contains(KeyModifiers::SHIFT) {
+            "-shift"
+        } else {
+            ""
+        };
+        one(&format!("{primary_modifier}{shift}-z"))
     }
 
     fn expect_conflict(keymap: &TuiKeymap, first: &str, second: &str) {
@@ -2681,14 +2717,10 @@ mod tests {
 
     #[test]
     fn undo_defaults_yield_to_existing_editor_bindings() {
-        let (undo, redo) = if cfg!(windows) {
-            ("ctrl-z", "ctrl-shift-z")
-        } else {
-            ("alt-z", "alt-shift-z")
-        };
         let mut keymap = TuiKeymap::default();
-        keymap.editor.move_line_start = Some(one(undo));
-        keymap.editor.move_line_end = Some(one(redo));
+        keymap.editor.move_line_start =
+            Some(one_composer_z_binding(default_composer_undo_binding()));
+        keymap.editor.move_line_end = Some(one_composer_z_binding(default_composer_redo_binding()));
 
         let runtime = RuntimeKeymap::from_config(&keymap).expect("editor bindings should win");
 

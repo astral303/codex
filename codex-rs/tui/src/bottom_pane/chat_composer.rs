@@ -2148,7 +2148,7 @@ impl ChatComposer {
         }
 
         let before_edit = self.snapshot_draft();
-        let undo_revision = self.undo_history.revision();
+        let history_epoch_before_dispatch = self.undo_history.mutation_epoch();
         let result = match &mut self.popups.active {
             ActivePopup::Command(_) => self.handle_key_event_with_slash_popup(key_event),
             ActivePopup::File(_) => self.handle_key_event_with_file_popup(key_event),
@@ -2157,6 +2157,9 @@ impl ChatComposer {
             ActivePopup::None => self.handle_key_event_without_popup(key_event),
         };
         self.reset_vim_mode_after_successful_dispatch(&result.0);
+        // Some handlers record their own undo step. Record here only if none changed history.
+        let nested_handler_mutated_history =
+            self.undo_history.mutation_epoch() != history_epoch_before_dispatch;
         if matches!(
             &result.0,
             InputResult::Submitted { .. }
@@ -2166,7 +2169,7 @@ impl ChatComposer {
                 | InputResult::CommandWithArgs(_, _, _)
         ) {
             self.establish_undo_baseline();
-        } else if self.undo_history.revision() == undo_revision {
+        } else if !nested_handler_mutated_history {
             self.record_edit_since(before_edit);
         }
         // Update (or hide/show) popup after processing the key.
