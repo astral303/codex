@@ -60,6 +60,9 @@
 //! When recalling a persistent entry, encoded task links restore atomic elements and bindings.
 //! Recalled entries move the cursor to end-of-line so repeated Up/Down presses keep shell-like
 //! history traversal semantics instead of dropping to column 0.
+//! Up/Down does not create undo steps. When recalled content matches the adjacent undo or redo
+//! state, navigation reuses that state and preserves earlier history; unrelated recalls establish
+//! a new undo baseline.
 //! `Ctrl+R` opens a reverse incremental search mode. The footer becomes the search input; once the
 //! query is non-empty, the composer body previews the current match. `Enter` accepts the preview as
 //! an editable draft and `Esc` restores the draft that was active when search started.
@@ -239,8 +242,10 @@ use ratatui::widgets::WidgetRef;
 use codex_protocol::openai_models::ReasoningEffort;
 
 use super::chat_composer_history::ChatComposerHistory;
+use super::chat_composer_history::HistoryDirection;
 use super::chat_composer_history::HistoryEntry;
 use super::chat_composer_history::HistoryEntryResponse;
+use super::chat_composer_history::HistoryNavigation;
 use super::chat_composer_history::HistorySearchResult;
 use super::command_popup::CommandItem;
 use super::effort_ignition::EffortIgnition;
@@ -1149,10 +1154,10 @@ impl ChatComposer {
             .history
             .on_entry_response(log_id, offset, entry, &self.app_event_tx)
         {
-            HistoryEntryResponse::Found(entry) => {
+            HistoryEntryResponse::Found(navigation) => {
                 // Persistent ↑/↓ history is text-only (backwards-compatible and avoids persisting
                 // attachments), but local in-session ↑/↓ history can rehydrate elements and image paths.
-                self.apply_history_entry(entry);
+                self.apply_history_navigation(navigation);
                 true
             }
             HistoryEntryResponse::Search(result) => {
@@ -1891,6 +1896,20 @@ impl ChatComposer {
         );
         self.replace_pending_pastes(pending_pastes);
         self.move_cursor_to_history_entry_end();
+    }
+
+    fn apply_history_navigation(&mut self, navigation: HistoryNavigation) {
+        let current = self.snapshot_draft();
+        self.apply_history_entry(navigation.entry);
+        let recalled = self.snapshot_draft();
+        let adjacent_draft = match navigation.direction {
+            HistoryDirection::Older => self.undo_history.undo(current),
+            HistoryDirection::Newer => self.undo_history.redo(current),
+        };
+        match adjacent_draft {
+            Some(draft) if draft.has_same_content(&recalled) => self.restore_draft(draft),
+            Some(_) | None => self.establish_undo_baseline(),
+        }
     }
 
     pub(crate) fn text_elements(&self) -> Vec<TextElement> {
@@ -3749,14 +3768,13 @@ impl ChatComposer {
                 .history
                 .should_handle_navigation(&self.current_text(), self.history_navigation_cursor())
             {
-                let replace_entry = if history_up_pressed {
+                let navigation = if history_up_pressed {
                     self.history.navigate_up(&self.app_event_tx)
                 } else {
                     self.history.navigate_down(&self.app_event_tx)
                 };
-                if let Some(entry) = replace_entry {
-                    self.apply_history_entry(entry);
-                    self.establish_undo_baseline();
+                if let Some(navigation) = navigation {
+                    self.apply_history_navigation(navigation);
                     return (InputResult::None, true);
                 }
             }
@@ -6494,7 +6512,10 @@ mod tests {
 
         assert_eq!(
             composer.history.navigate_up(&composer.app_event_tx),
-            Some(HistoryEntry::new("draft text".to_string()))
+            Some(HistoryNavigation {
+                direction: HistoryDirection::Older,
+                entry: HistoryEntry::new("draft text".to_string()),
+            })
         );
     }
 
@@ -6530,7 +6551,8 @@ mod tests {
         let history_entry = composer
             .history
             .navigate_up(&composer.app_event_tx)
-            .expect("expected history entry");
+            .expect("expected history entry")
+            .entry;
         let text_elements = vec![TextElement::new(
             (0..placeholder.len()).into(),
             Some(placeholder.clone()),
@@ -6804,7 +6826,8 @@ mod tests {
         let history_entry = composer
             .history
             .navigate_up(&composer.app_event_tx)
-            .expect("expected history entry");
+            .expect("expected history entry")
+            .entry;
         let text_elements = vec![TextElement::new(
             (0..placeholder.len()).into(),
             Some(placeholder.clone()),
@@ -6860,13 +6883,16 @@ mod tests {
 
         assert_eq!(
             composer.history.navigate_up(&composer.app_event_tx),
-            Some(HistoryEntry::with_pending_and_remote(
-                expected_text,
-                expected_elements,
-                vec![local_image_path],
-                Vec::new(),
-                vec![remote_image_url],
-            ))
+            Some(HistoryNavigation {
+                direction: HistoryDirection::Older,
+                entry: HistoryEntry::with_pending_and_remote(
+                    expected_text,
+                    expected_elements,
+                    vec![local_image_path],
+                    Vec::new(),
+                    vec![remote_image_url],
+                ),
+            })
         );
     }
 
