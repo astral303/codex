@@ -166,14 +166,32 @@ impl ComposerUndoHistory {
         self.advance_mutation_epoch();
     }
 
-    /// Forget temporary edit records that were reclassified as part of one larger action.
-    pub(super) fn discard_provisional_edits(&mut self, count: usize) {
-        for _ in 0..count {
-            if self.pop_undo().is_none() {
-                break;
-            }
+    pub(super) fn try_discard_provisional_edits(
+        &mut self,
+        provisional_edit_count: usize,
+        expected_before_provisional_edits: &EditableDraft,
+    ) -> bool {
+        let Some(first_provisional_edit_index) =
+            self.undo.len().checked_sub(provisional_edit_count)
+        else {
+            return false;
+        };
+        let Some(stored_before_provisional_edits) = self.undo.get(first_provisional_edit_index)
+        else {
+            return false;
+        };
+        if &stored_before_provisional_edits.draft != expected_before_provisional_edits {
+            return false;
+        }
+
+        for _ in 0..provisional_edit_count {
+            assert!(
+                self.pop_undo().is_some(),
+                "validated provisional composer edit must exist"
+            );
         }
         self.advance_mutation_epoch();
+        true
     }
 
     fn push_undo_if_it_fits(&mut self, draft: EditableDraft) {
