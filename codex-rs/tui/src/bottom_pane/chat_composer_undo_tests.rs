@@ -92,6 +92,111 @@ fn ctrl_c_undo_restores_the_complete_draft_and_redo_clears_it() {
 }
 
 #[test]
+fn history_up_reuses_ctrl_c_undo_lineage_without_becoming_an_undo_step() {
+    let (mut composer, _rx) = new_composer();
+    assert!(press(&mut composer, KeyCode::Char('a')));
+    let before_second_edit = composer.snapshot_draft();
+    assert!(press(&mut composer, KeyCode::Char('b')));
+    composer.set_current_cursor(1);
+    let before_clear = composer.snapshot_draft();
+
+    assert!(composer.clear_for_ctrl_c().is_some());
+    let after_clear = composer.snapshot_draft();
+    assert!(press(&mut composer, KeyCode::Up));
+    assert_eq!(composer.snapshot_draft(), before_clear);
+
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.snapshot_draft(), before_second_edit);
+    assert!(press(&mut composer, REDO_KEY));
+    assert_eq!(composer.snapshot_draft(), before_clear);
+    assert!(press(&mut composer, REDO_KEY));
+    assert_eq!(composer.snapshot_draft(), after_clear);
+}
+
+#[test]
+fn history_down_reuses_ctrl_c_redo_lineage() {
+    let (mut composer, _rx) = new_composer();
+    assert!(press(&mut composer, KeyCode::Char('a')));
+    let before_second_edit = composer.snapshot_draft();
+    assert!(press(&mut composer, KeyCode::Char('b')));
+    let before_clear = composer.snapshot_draft();
+
+    assert!(composer.clear_for_ctrl_c().is_some());
+    let after_clear = composer.snapshot_draft();
+    assert!(press(&mut composer, KeyCode::Up));
+    assert_eq!(composer.snapshot_draft(), before_clear);
+    assert!(press(&mut composer, KeyCode::Down));
+    assert_eq!(composer.snapshot_draft(), after_clear);
+
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.snapshot_draft(), before_clear);
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.snapshot_draft(), before_second_edit);
+}
+
+#[test]
+fn unrelated_history_recall_starts_a_new_undo_baseline() {
+    let (mut composer, _rx) = new_composer();
+    assert!(press(&mut composer, KeyCode::Char('a')));
+    assert!(press(&mut composer, KeyCode::Char('b')));
+    assert!(composer.clear_for_ctrl_c().is_some());
+    composer
+        .history
+        .record_local_submission(HistoryEntry::new("unrelated prompt".to_string()));
+
+    assert!(press(&mut composer, KeyCode::Up));
+    assert_eq!(composer.current_text(), "unrelated prompt");
+    assert!(!press(&mut composer, UNDO_KEY));
+}
+
+#[test]
+fn equal_text_without_rich_draft_state_does_not_reuse_undo_lineage() {
+    let (mut composer, _rx) = new_composer();
+    composer.set_text_content("same text".to_string(), Vec::new(), Vec::new());
+    composer.set_remote_image_urls(vec!["https://example.test/remote.png".to_string()]);
+    composer.move_cursor_to_end();
+    assert!(composer.clear_for_ctrl_c().is_some());
+    composer
+        .history
+        .record_local_submission(HistoryEntry::new("same text".to_string()));
+
+    assert!(press(&mut composer, KeyCode::Up));
+    assert_eq!(composer.current_text(), "same text");
+    assert!(composer.remote_image_urls().is_empty());
+    assert!(!press(&mut composer, UNDO_KEY));
+}
+
+#[test]
+fn async_history_recall_uses_the_same_undo_lineage_transition() {
+    let (mut composer, mut rx) = new_composer();
+    let thread_id = ThreadId::new();
+    composer.set_history_metadata(thread_id, /*log_id*/ 1, /*entry_count*/ 0);
+    assert!(press(&mut composer, KeyCode::Char('a')));
+    let before_second_edit = composer.snapshot_draft();
+    assert!(press(&mut composer, KeyCode::Char('b')));
+    composer.set_current_cursor(1);
+    let before_clear = composer.snapshot_draft();
+    assert!(composer.clear_for_ctrl_c().is_some());
+
+    composer.set_history_metadata(thread_id, /*log_id*/ 2, /*entry_count*/ 1);
+    let _ = press(&mut composer, KeyCode::Up);
+    let AppEvent::LookupMessageHistoryEntry {
+        thread_id: requested_thread_id,
+        offset,
+        log_id,
+    } = rx.try_recv().expect("expected persistent history lookup")
+    else {
+        panic!("unexpected app event");
+    };
+    assert_eq!((requested_thread_id, offset, log_id), (thread_id, 0, 2));
+
+    assert!(composer.on_history_entry_response(2, 0, Some("ab".to_string())));
+    assert_eq!(composer.snapshot_draft(), before_clear);
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.snapshot_draft(), before_second_edit);
+}
+
+#[test]
 fn cursor_motion_preserves_redo_but_a_divergent_edit_discards_it() {
     let (mut composer, _rx) = new_composer();
     composer.insert_str("ab");
