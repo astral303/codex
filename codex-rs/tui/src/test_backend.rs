@@ -22,6 +22,7 @@ pub struct VT100Backend {
     crossterm_backend: CrosstermBackend<vt100::Parser>,
     written: Vec<u8>,
     append_lines_calls: Vec<u16>,
+    fail_next_write: bool,
 }
 
 impl VT100Backend {
@@ -40,6 +41,7 @@ impl VT100Backend {
             )),
             written: Vec::new(),
             append_lines_calls: Vec::new(),
+            fail_next_write: false,
         }
     }
 
@@ -58,10 +60,17 @@ impl VT100Backend {
     pub fn written(&self) -> &[u8] {
         &self.written
     }
+
+    pub fn fail_next_write(&mut self) {
+        self.fail_next_write = true;
+    }
 }
 
 impl Write for VT100Backend {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if std::mem::take(&mut self.fail_next_write) {
+            return Err(io::Error::other("injected terminal write failure"));
+        }
         let written = self.crossterm_backend.writer_mut().write(buf)?;
         self.written.extend_from_slice(&buf[..written]);
         Ok(written)

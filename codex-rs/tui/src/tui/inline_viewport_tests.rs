@@ -1,6 +1,8 @@
 use std::io::Write as _;
 
 use super::CoveredHistoryPolicy;
+use super::InlineViewportState;
+use super::TranscriptReplayTarget;
 use super::WindowsInlineViewportState;
 use crate::custom_terminal::Terminal as CustomTerminal;
 use crate::insert_history::HistoryLineWrapPolicy;
@@ -24,6 +26,176 @@ fn terminal(width: u16, height: u16, viewport: Rect) -> TestTerminal {
             .expect("terminal");
     terminal.set_viewport_area(viewport);
     terminal
+}
+
+#[test]
+fn transcript_replay_waits_for_draw_and_clears_before_writing_rows() {
+    let width = 24;
+    let height = 8;
+    let mut terminal = terminal(
+        width,
+        height,
+        Rect::new(/*x*/ 0, /*y*/ 5, width, /*height*/ 3),
+    );
+    terminal.backend_mut().clear_written();
+    let mut state = InlineViewportState::default();
+    let replay_lines = plain_hyperlink_lines(vec![Line::from("REPLAY-ROW")]);
+
+    state.queue_transcript_replay(
+        TranscriptReplayTarget::InlineViewport,
+        replay_lines,
+        HistoryLineWrapPolicy::PreWrap,
+    );
+    let prepared_replay = state
+        .prepare_pending_transcript_replay(width, /*is_zellij*/ false)
+        .expect("prepared replay");
+
+    assert!(state.has_pending_transcript_replay());
+    assert!(terminal.backend().written().is_empty());
+    assert_eq!(terminal.viewport_area.top(), 5);
+
+    state
+        .begin_transcript_replay(&mut terminal)
+        .expect("begin replay");
+    assert_eq!(terminal.viewport_area.top(), 0);
+    state
+        .update_for_resize_reflow(&mut terminal, /*height*/ 3, Size::new(width, height))
+        .expect("update viewport");
+    state
+        .write_prepared_transcript_replay(&mut terminal, Some(&prepared_replay))
+        .expect("write replay");
+
+    let written = terminal.backend().written();
+    let clear_offset = written
+        .windows(b"\x1b[2J\x1b[3J".len())
+        .position(|window| window == b"\x1b[2J\x1b[3J")
+        .expect("full clear sequence");
+    let replay_offset = written
+        .windows(b"REPLAY-ROW".len())
+        .position(|window| window == b"REPLAY-ROW")
+        .expect("replayed history row");
+    assert!(clear_offset < replay_offset);
+    assert!(state.has_pending_transcript_replay());
+
+    state.complete_transcript_replay();
+    assert!(!state.has_pending_transcript_replay());
+}
+
+#[test]
+fn transcript_replay_survives_clear_and_history_write_failures() {
+    let width = 24;
+    let height = 8;
+    let mut terminal = terminal(
+        width,
+        height,
+        Rect::new(/*x*/ 0, /*y*/ 5, width, /*height*/ 3),
+    );
+    let mut state = InlineViewportState::default();
+    let replay_lines = plain_hyperlink_lines(vec![Line::from("RETRY-ROW")]);
+    state.queue_transcript_replay(
+        TranscriptReplayTarget::InlineViewport,
+        replay_lines.clone(),
+        HistoryLineWrapPolicy::PreWrap,
+    );
+    let prepared_replay = state
+        .prepare_pending_transcript_replay(width, /*is_zellij*/ false)
+        .expect("prepared replay");
+
+    terminal.backend_mut().fail_next_write();
+    assert!(state.begin_transcript_replay(&mut terminal).is_err());
+    assert_eq!(
+        state.pending_transcript_replay_lines_for_test(),
+        replay_lines
+    );
+
+    state
+        .begin_transcript_replay(&mut terminal)
+        .expect("retry clear");
+    state
+        .update_for_resize_reflow(&mut terminal, /*height*/ 3, Size::new(width, height))
+        .expect("update viewport");
+    terminal.backend_mut().fail_next_write();
+    assert!(
+        state
+            .write_prepared_transcript_replay(&mut terminal, Some(&prepared_replay))
+            .is_err()
+    );
+    assert_eq!(
+        state.pending_transcript_replay_lines_for_test(),
+        replay_lines
+    );
+
+    state
+        .begin_transcript_replay(&mut terminal)
+        .expect("restart replay");
+    state
+        .update_for_resize_reflow(&mut terminal, /*height*/ 3, Size::new(width, height))
+        .expect("retry viewport update");
+    state
+        .write_prepared_transcript_replay(&mut terminal, Some(&prepared_replay))
+        .expect("retry history write");
+    state.complete_transcript_replay();
+
+    assert!(!state.has_pending_transcript_replay());
+}
+
+#[test]
+fn transcript_replay_survives_frame_draw_failure() {
+    let width = 24;
+    let height = 8;
+    let mut terminal = terminal(
+        width,
+        height,
+        Rect::new(/*x*/ 0, /*y*/ 5, width, /*height*/ 3),
+    );
+    let mut state = InlineViewportState::default();
+    state.queue_transcript_replay(
+        TranscriptReplayTarget::InlineViewport,
+        plain_hyperlink_lines(vec![Line::from("DRAW-RETRY-ROW")]),
+        HistoryLineWrapPolicy::PreWrap,
+    );
+    let prepared_replay = state
+        .prepare_pending_transcript_replay(width, /*is_zellij*/ false)
+        .expect("prepared replay");
+
+    state
+        .begin_transcript_replay(&mut terminal)
+        .expect("begin replay");
+    state
+        .update_for_resize_reflow(&mut terminal, /*height*/ 3, Size::new(width, height))
+        .expect("update viewport");
+    state
+        .write_prepared_transcript_replay(&mut terminal, Some(&prepared_replay))
+        .expect("write replay");
+    terminal.backend_mut().fail_next_write();
+    assert!(
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                frame.buffer_mut()[(area.x, area.y)].set_symbol("X");
+            })
+            .is_err()
+    );
+    assert!(state.has_pending_transcript_replay());
+
+    state
+        .begin_transcript_replay(&mut terminal)
+        .expect("restart replay");
+    state
+        .update_for_resize_reflow(&mut terminal, /*height*/ 3, Size::new(width, height))
+        .expect("retry viewport update");
+    state
+        .write_prepared_transcript_replay(&mut terminal, Some(&prepared_replay))
+        .expect("retry history write");
+    terminal
+        .draw(|frame| {
+            let area = frame.area();
+            frame.buffer_mut()[(area.x, area.y)].set_symbol("X");
+        })
+        .expect("retry frame draw");
+    state.complete_transcript_replay();
+
+    assert!(!state.has_pending_transcript_replay());
 }
 
 #[test]

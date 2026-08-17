@@ -351,7 +351,10 @@ async fn terminal_reflow_rebases_pending_status_update_to_new_width() -> Result<
         successful_thread_usage(thread_id, request_id),
     )
     .await?;
-    assert!(tui.pending_history_lines_for_test().is_empty());
+    assert!(tui.transcript_replay_is_pending_for_test());
+    let pending = pending_history_text(&tui);
+    assert!(pending.contains("50 credits"), "{pending}");
+    assert_eq!(pending.matches("50 credits").count(), 1, "{pending}");
     assert!(!app.transcript_reflow.has_pending_reflow());
     app_server.shutdown().await?;
     Ok(())

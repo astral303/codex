@@ -5583,6 +5583,23 @@ async fn height_shrink_schedules_resize_reflow() {
 }
 
 #[tokio::test]
+async fn resize_reflow_queues_a_transcript_replay_for_the_next_draw() -> Result<()> {
+    let (mut app, _rx, _op_rx) = make_test_app_with_channels().await;
+    app.transcript_cells = vec![plain_line_cell("existing transcript")];
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+
+    assert!(!tui.transcript_replay_is_pending_for_test());
+    app.reflow_transcript_now(
+        &mut tui,
+        ratatui::layout::Size::new(/*width*/ 80, /*height*/ 24).into(),
+    )?;
+
+    assert!(tui.transcript_replay_is_pending_for_test());
+    assert!(!tui.pending_history_lines_for_test().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
 async fn resizing_empty_transcript_schedules_settled_size_recheck() {
     let (mut app, _rx, _op_rx) = make_test_app_with_channels().await;
     let mut tui = crate::tui::test_support::make_test_tui().expect("test tui");

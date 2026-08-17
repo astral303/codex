@@ -9,9 +9,14 @@ use crate::insert_history::HistoryTailReplacement;
 #[cfg(any(windows, test))]
 use crate::insert_history::InlineHistoryPlacement;
 use crate::insert_history::InsertHistoryMode;
+use crate::insert_history::PreparedHistoryLines;
 #[cfg(any(windows, test))]
 use crate::insert_history::append_history_hyperlink_lines_at_placement;
+#[cfg(any(windows, test))]
+use crate::insert_history::append_prepared_history_hyperlink_lines_at_placement;
 use crate::insert_history::insert_history_hyperlink_lines_with_mode_and_wrap_policy;
+use crate::insert_history::insert_prepared_history_hyperlink_lines_with_mode;
+use crate::insert_history::prepare_history_hyperlink_lines;
 #[cfg(any(windows, test))]
 use crate::insert_history::record_inline_history_terminal_scroll;
 #[cfg(any(windows, test))]
@@ -29,16 +34,272 @@ use super::covered_history::CoveredHistoryPolicy;
 #[cfg(any(windows, test))]
 use super::covered_history::reconcile_after_draw;
 
+#[derive(Debug)]
+pub(super) struct PendingHistoryLines {
+    pub(super) lines: Vec<HyperlinkLine>,
+    pub(super) wrap_policy: HistoryLineWrapPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TranscriptReplayTarget {
+    AlternateScreen,
+    InlineViewport,
+}
+
+#[derive(Debug)]
+struct PendingTranscriptReplay {
+    target: TranscriptReplayTarget,
+    history: Vec<PendingHistoryLines>,
+}
+
+#[derive(Debug)]
+pub(super) struct PreparedTranscriptReplay {
+    history: Vec<PreparedHistoryBatch>,
+}
+
+#[derive(Debug)]
+struct PreparedHistoryBatch {
+    lines: PreparedHistoryLines,
+    mode: InsertHistoryMode,
+}
+
+impl PendingTranscriptReplay {
+    fn new(
+        target: TranscriptReplayTarget,
+        lines: Vec<HyperlinkLine>,
+        wrap_policy: HistoryLineWrapPolicy,
+    ) -> Self {
+        let mut replay = Self {
+            target,
+            history: Vec::new(),
+        };
+        replay.append(lines, wrap_policy);
+        replay
+    }
+
+    fn append(&mut self, lines: Vec<HyperlinkLine>, wrap_policy: HistoryLineWrapPolicy) {
+        if lines.is_empty() {
+            return;
+        }
+        if let Some(last) = self.history.last_mut()
+            && last.wrap_policy == wrap_policy
+        {
+            last.lines.extend(lines);
+        } else {
+            self.history
+                .push(PendingHistoryLines { lines, wrap_policy });
+        }
+    }
+
+    fn prepare(&self, wrap_width: usize, is_zellij: bool) -> PreparedTranscriptReplay {
+        let history = self
+            .history
+            .iter()
+            .map(|batch| {
+                let mode = if is_zellij && batch.wrap_policy == HistoryLineWrapPolicy::Terminal {
+                    InsertHistoryMode::ZellijRaw
+                } else {
+                    InsertHistoryMode::Standard
+                };
+                PreparedHistoryBatch {
+                    lines: prepare_history_hyperlink_lines(
+                        &batch.lines,
+                        wrap_width,
+                        batch.wrap_policy,
+                    ),
+                    mode,
+                }
+            })
+            .collect();
+        PreparedTranscriptReplay { history }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(super) struct InlineViewportState {
+    pending_transcript_replay: Option<PendingTranscriptReplay>,
     #[cfg(windows)]
     windows: WindowsInlineViewportState,
 }
 
 impl InlineViewportState {
     pub(super) fn reset(&mut self) {
+        self.pending_transcript_replay = None;
+        self.reset_platform_state();
+    }
+
+    fn reset_platform_state(&mut self) {
         #[cfg(windows)]
         self.windows.reset();
+    }
+
+    pub(super) fn queue_transcript_replay(
+        &mut self,
+        target: TranscriptReplayTarget,
+        lines: Vec<HyperlinkLine>,
+        wrap_policy: HistoryLineWrapPolicy,
+    ) {
+        self.pending_transcript_replay =
+            Some(PendingTranscriptReplay::new(target, lines, wrap_policy));
+    }
+
+    pub(super) fn has_pending_transcript_replay(&self) -> bool {
+        self.pending_transcript_replay.is_some()
+    }
+
+    pub(super) fn append_to_pending_transcript_replay(
+        &mut self,
+        lines: Vec<HyperlinkLine>,
+        wrap_policy: HistoryLineWrapPolicy,
+    ) {
+        self.pending_transcript_replay
+            .as_mut()
+            .expect("transcript replay must be pending before appending rows")
+            .append(lines, wrap_policy);
+    }
+
+    pub(super) fn prepare_pending_transcript_replay(
+        &self,
+        wrap_width: u16,
+        is_zellij: bool,
+    ) -> Option<PreparedTranscriptReplay> {
+        self.pending_transcript_replay
+            .as_ref()
+            .map(|replay| replay.prepare(usize::from(wrap_width.max(1)), is_zellij))
+    }
+
+    pub(super) fn begin_transcript_replay<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> io::Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        let Some(target) = self
+            .pending_transcript_replay
+            .as_ref()
+            .map(|replay| replay.target)
+        else {
+            return Ok(());
+        };
+
+        self.reset_platform_state();
+        self.anchor_viewport_for_transcript_replay(terminal);
+        match target {
+            TranscriptReplayTarget::AlternateScreen => terminal.clear_visible_screen(),
+            TranscriptReplayTarget::InlineViewport => {
+                terminal.clear_scrollback_and_visible_screen_ansi()
+            }
+        }
+    }
+
+    fn anchor_viewport_for_transcript_replay<B>(&self, terminal: &mut Terminal<B>)
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        let mut area = terminal.viewport_area;
+        area.y = 0;
+        terminal.set_viewport_area(area);
+    }
+
+    pub(super) fn write_prepared_transcript_replay<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        prepared: Option<&PreparedTranscriptReplay>,
+    ) -> io::Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        let Some(replay) = prepared else {
+            return Ok(());
+        };
+        self.write_prepared_history_batches(terminal, &replay.history)
+    }
+
+    pub(super) fn complete_transcript_replay(&mut self) {
+        self.pending_transcript_replay = None;
+    }
+
+    pub(super) fn flush_pending_history_lines<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        pending_history: &mut Vec<PendingHistoryLines>,
+        is_zellij: bool,
+    ) -> io::Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        self.write_history_batches(terminal, pending_history, is_zellij)?;
+        pending_history.clear();
+        Ok(())
+    }
+
+    fn write_history_batches<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        batches: &[PendingHistoryLines],
+        is_zellij: bool,
+    ) -> io::Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        for batch in batches {
+            let mode = if is_zellij && batch.wrap_policy == HistoryLineWrapPolicy::Terminal {
+                InsertHistoryMode::ZellijRaw
+            } else {
+                InsertHistoryMode::Standard
+            };
+            if mode == InsertHistoryMode::Standard {
+                self.append_standard_history(terminal, &batch.lines, batch.wrap_policy)?;
+            } else {
+                insert_history_hyperlink_lines_with_mode_and_wrap_policy(
+                    terminal,
+                    &batch.lines,
+                    mode,
+                    batch.wrap_policy,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn write_prepared_history_batches<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        batches: &[PreparedHistoryBatch],
+    ) -> io::Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        for batch in batches {
+            if batch.mode == InsertHistoryMode::Standard {
+                #[cfg(windows)]
+                self.windows
+                    .append_prepared_standard_history(terminal, &batch.lines)?;
+                #[cfg(not(windows))]
+                insert_prepared_history_hyperlink_lines_with_mode(
+                    terminal,
+                    &batch.lines,
+                    batch.mode,
+                )?;
+            } else {
+                insert_prepared_history_hyperlink_lines_with_mode(
+                    terminal,
+                    &batch.lines,
+                    batch.mode,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn pending_transcript_replay_lines_for_test(&self) -> Vec<HyperlinkLine> {
+        self.pending_transcript_replay
+            .iter()
+            .flat_map(|replay| replay.history.iter())
+            .flat_map(|batch| batch.lines.iter().cloned())
+            .collect()
     }
 
     pub(super) fn append_standard_history<B>(
@@ -103,6 +364,9 @@ impl InlineViewportState {
         screen_size: Size,
         current_top: u16,
     ) -> bool {
+        if self.has_pending_transcript_replay() {
+            return false;
+        }
         #[cfg(windows)]
         {
             let requested_top = screen_size
@@ -248,6 +512,25 @@ impl WindowsInlineViewportState {
                 lines,
                 InsertHistoryMode::Standard,
                 wrap_policy,
+            )
+        }
+    }
+
+    fn append_prepared_standard_history<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        lines: &PreparedHistoryLines,
+    ) -> io::Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        if let Some(placement) = self.placement.as_mut() {
+            append_prepared_history_hyperlink_lines_at_placement(terminal, lines, placement)
+        } else {
+            insert_prepared_history_hyperlink_lines_with_mode(
+                terminal,
+                lines,
+                InsertHistoryMode::Standard,
             )
         }
     }

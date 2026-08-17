@@ -11,6 +11,25 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use std::io::Write;
 
+#[tokio::test]
+async fn tail_replacement_preserves_a_pending_transcript_replay() {
+    let mut tui = crate::tui::test_support::make_test_tui().expect("test tui");
+    let replay = plain_hyperlink_lines(vec![Line::from("complete replay")]);
+    tui.queue_transcript_replay(replay.clone(), HistoryLineWrapPolicy::PreWrap);
+
+    let outcome = tui
+        .replace_visible_history_tail(
+            &plain_hyperlink_lines(vec![Line::from("previous tail")]),
+            &plain_hyperlink_lines(vec![Line::from("replacement tail")]),
+            HistoryLineWrapPolicy::PreWrap,
+        )
+        .expect("defer tail replacement");
+
+    assert_eq!(outcome, HistoryTailReplacement::RequiresTranscriptReflow);
+    assert!(tui.transcript_replay_is_pending_for_test());
+    assert_eq!(tui.pending_history_lines_for_test(), replay);
+}
+
 #[test]
 fn replacing_visible_history_tail_preserves_existing_terminal_scrollback() {
     let width = 52;

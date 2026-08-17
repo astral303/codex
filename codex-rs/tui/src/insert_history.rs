@@ -11,6 +11,8 @@ pub(crate) use inline_history::InlineHistoryPlacement;
 #[cfg(any(windows, test))]
 pub(crate) use inline_history::append_history_hyperlink_lines_at_placement;
 #[cfg(any(windows, test))]
+pub(crate) use inline_history::append_prepared_history_hyperlink_lines_at_placement;
+#[cfg(any(windows, test))]
 pub(crate) use inline_history::record_inline_history_terminal_scroll;
 #[cfg(any(windows, test))]
 pub(crate) use inline_history::repaint_inline_history_tail;
@@ -87,6 +89,13 @@ pub(crate) enum InsertHistoryMode {
     ZellijRaw,
 }
 
+#[derive(Debug)]
+pub(crate) struct PreparedHistoryLines {
+    pub(crate) lines: Vec<HyperlinkLine>,
+    pub(crate) row_count: usize,
+    pub(crate) wrap_width: usize,
+}
+
 /// Insert `lines` above the viewport using the terminal's backend writer
 /// (avoids direct stdout references).
 pub fn insert_history_lines<B>(
@@ -141,32 +150,38 @@ pub(crate) fn insert_history_hyperlink_lines_with_mode_and_wrap_policy<B>(
 where
     B: Backend<Error = io::Error> + Write,
 {
+    let wrap_width = usize::from(terminal.viewport_area.width.max(1));
+    let prepared = prepare_history_hyperlink_lines(lines, wrap_width, wrap_policy);
+    insert_prepared_history_hyperlink_lines_with_mode(terminal, &prepared, mode)
+}
+
+pub(crate) fn insert_prepared_history_hyperlink_lines_with_mode<B>(
+    terminal: &mut crate::custom_terminal::Terminal<B>,
+    prepared: &PreparedHistoryLines,
+    mode: InsertHistoryMode,
+) -> io::Result<()>
+where
+    B: Backend<Error = io::Error> + Write,
+{
     let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
 
     let mut area = terminal.viewport_area;
     let mut should_update_area = false;
     let last_cursor_pos = terminal.last_known_cursor_pos;
+    // Build the row output in memory before writing it to the backend. In particular, this
+    // prevents line-buffered stdout from flushing once per history row.
+    let mut output = Vec::new();
 
-    // Pre-wrap lines for terminal scrollback. Three paths:
-    //
-    // - URL-only-ish lines are kept intact (no hard newlines inserted) so that
-    //   terminal emulators can match them as clickable links. The
-    //   terminal will character-wrap these lines at the viewport
-    //   boundary.
-    // - Mixed lines (URL + non-URL prose) are adaptively wrapped so
-    //   non-URL text still wraps naturally while URL tokens remain
-    //   unsplit.
-    // - Non-URL lines also flow through adaptive wrapping; behavior is
-    //   equivalent to standard wrapping when no URL is present.
-    let wrap_width = area.width.max(1) as usize;
-    let (wrapped, wrapped_rows) = wrap_history_hyperlink_lines(lines, wrap_width, wrap_policy);
-    let wrapped_lines = wrapped_rows as u16;
+    debug_assert_eq!(prepared.wrap_width, usize::from(area.width.max(1)));
+    let wrapped = &prepared.lines;
+    let wrapped_lines = prepared.row_count as u16;
+    let wrap_width = prepared.wrap_width;
     match mode {
         InsertHistoryMode::ZellijRaw => {
             // The existing viewport is immediately replaced in the same draw pass. Clear it
             // before terminal scrolling can move composer contents into scrollback.
             terminal.clear_after_position(area.as_position())?;
-            let writer = terminal.backend_mut();
+            let writer = &mut output;
             queue!(writer, MoveTo(/*x*/ 0, area.top()))?;
             for (index, line) in wrapped.iter().enumerate() {
                 if index > 0 {
@@ -193,7 +208,7 @@ where
             }
         }
         InsertHistoryMode::Standard | InsertHistoryMode::StandardAtHistoryBoundary { .. } => {
-            let writer = terminal.backend_mut();
+            let writer = &mut output;
             let default_cursor_top = if area.bottom() < screen_size.height {
                 // If the viewport is not at the bottom of the screen, scroll it down to make room.
                 // Don't scroll it past the bottom of the screen.
@@ -243,7 +258,7 @@ where
             // fetch/restore the cursor position. insert_history_lines should be cursor-position-neutral :)
             queue!(writer, MoveTo(/*x*/ 0, cursor_top))?;
 
-            for line in &wrapped {
+            for line in wrapped {
                 queue!(writer, Print("\r\n"))?;
                 write_history_line(writer, line, wrap_width)?;
             }
@@ -253,6 +268,8 @@ where
         }
     }
 
+    terminal.backend_mut().write_all(&output)?;
+
     if should_update_area {
         terminal.set_viewport_area(area);
     }
@@ -261,6 +278,30 @@ where
     }
 
     Ok(())
+}
+
+pub(crate) fn prepare_history_hyperlink_lines(
+    lines: &[HyperlinkLine],
+    wrap_width: usize,
+    wrap_policy: HistoryLineWrapPolicy,
+) -> PreparedHistoryLines {
+    // Pre-wrap lines for terminal scrollback. Three paths:
+    //
+    // - URL-only-ish lines are kept intact (no hard newlines inserted) so that
+    //   terminal emulators can match them as clickable links. The
+    //   terminal will character-wrap these lines at the viewport
+    //   boundary.
+    // - Mixed lines (URL + non-URL prose) are adaptively wrapped so
+    //   non-URL text still wraps naturally while URL tokens remain
+    //   unsplit.
+    // - Non-URL lines also flow through adaptive wrapping; behavior is
+    //   equivalent to standard wrapping when no URL is present.
+    let (lines, row_count) = wrap_history_hyperlink_lines(lines, wrap_width.max(1), wrap_policy);
+    PreparedHistoryLines {
+        lines,
+        row_count,
+        wrap_width: wrap_width.max(1),
+    }
 }
 
 pub(crate) fn wrap_history_hyperlink_lines(

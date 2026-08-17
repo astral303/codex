@@ -16,10 +16,20 @@ use std::io::Write;
 impl Tui {
     #[cfg(test)]
     pub(crate) fn pending_history_lines_for_test(&self) -> Vec<HyperlinkLine> {
-        self.pending_history_lines
-            .iter()
-            .flat_map(|batch| batch.lines.iter().cloned())
-            .collect()
+        let mut lines = self
+            .inline_viewport
+            .pending_transcript_replay_lines_for_test();
+        lines.extend(
+            self.pending_history_lines
+                .iter()
+                .flat_map(|batch| batch.lines.iter().cloned()),
+        );
+        lines
+    }
+
+    #[cfg(test)]
+    pub(crate) fn transcript_replay_is_pending_for_test(&self) -> bool {
+        self.inline_viewport.has_pending_transcript_replay()
     }
 
     #[cfg(all(test, windows))]
@@ -33,11 +43,13 @@ impl Tui {
         replacement: &[HyperlinkLine],
         wrap_policy: HistoryLineWrapPolicy,
     ) -> io::Result<HistoryTailReplacement> {
-        Self::flush_pending_history_lines(
+        if self.inline_viewport.has_pending_transcript_replay() {
+            return Ok(HistoryTailReplacement::RequiresTranscriptReflow);
+        }
+        self.inline_viewport.flush_pending_history_lines(
             &mut self.terminal,
             &mut self.pending_history_lines,
             self.is_zellij,
-            &mut self.inline_viewport,
         )?;
         if let Some(outcome) = self.inline_viewport.replace_visible_history_tail(
             &mut self.terminal,

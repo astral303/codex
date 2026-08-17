@@ -3,6 +3,7 @@
 mod append;
 
 pub(crate) use append::append_history_hyperlink_lines_at_placement;
+pub(crate) use append::append_prepared_history_hyperlink_lines_at_placement;
 pub(crate) use append::replace_history_tail_at_placement;
 
 use std::io;

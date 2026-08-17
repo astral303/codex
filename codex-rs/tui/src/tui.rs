@@ -49,7 +49,6 @@ use self::input_boundary::terminal_input_is_readable;
 use crate::custom_terminal;
 use crate::custom_terminal::Terminal as CustomTerminal;
 use crate::insert_history::HistoryLineWrapPolicy;
-use crate::insert_history::InsertHistoryMode;
 use crate::notifications::DesktopNotificationBackend;
 use crate::notifications::detect_backend;
 use crate::terminal_hyperlinks::HyperlinkLine;
@@ -57,6 +56,8 @@ use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use crate::tui::event_stream::EventBroker;
 use crate::tui::event_stream::TuiEventStream;
 use crate::tui::inline_viewport::InlineViewportState;
+use crate::tui::inline_viewport::PendingHistoryLines;
+use crate::tui::inline_viewport::TranscriptReplayTarget;
 #[cfg(unix)]
 use crate::tui::job_control::SuspendContext;
 use crate::tui::screen_size::ScreenSizePolicy;
@@ -607,11 +608,6 @@ pub struct Tui {
     _stderr_guard: terminal_stderr::TerminalStderrGuard,
 }
 
-struct PendingHistoryLines {
-    lines: Vec<HyperlinkLine>,
-    wrap_policy: HistoryLineWrapPolicy,
-}
-
 fn clear_for_viewport_change<B>(terminal: &mut CustomTerminal<B>, new_area: Rect) -> Result<()>
 where
     B: Backend<Error = io::Error> + Write,
@@ -875,7 +871,10 @@ impl Tui {
         if lines.is_empty() {
             return;
         }
-        if let Some(last) = self.pending_history_lines.last_mut()
+        if self.inline_viewport.has_pending_transcript_replay() {
+            self.inline_viewport
+                .append_to_pending_transcript_replay(lines, wrap_policy);
+        } else if let Some(last) = self.pending_history_lines.last_mut()
             && last.wrap_policy == wrap_policy
         {
             last.lines.extend(lines);
@@ -886,46 +885,26 @@ impl Tui {
         self.frame_requester().schedule_frame();
     }
 
+    pub(crate) fn queue_transcript_replay(
+        &mut self,
+        lines: Vec<HyperlinkLine>,
+        wrap_policy: HistoryLineWrapPolicy,
+    ) {
+        self.pending_history_lines.clear();
+        let target = if self.is_alt_screen_active() {
+            TranscriptReplayTarget::AlternateScreen
+        } else {
+            TranscriptReplayTarget::InlineViewport
+        };
+        self.inline_viewport
+            .queue_transcript_replay(target, lines, wrap_policy);
+        self.frame_requester().schedule_frame();
+    }
+
     /// Discard queued history and its placement state.
     pub fn reset_history_insertion_state(&mut self) {
         self.pending_history_lines.clear();
         self.inline_viewport.reset();
-    }
-
-    /// Write any buffered history lines above the viewport and clear the buffer.
-    fn flush_pending_history_lines(
-        terminal: &mut Terminal,
-        pending_history_lines: &mut Vec<PendingHistoryLines>,
-        is_zellij: bool,
-        inline_viewport: &mut InlineViewportState,
-    ) -> Result<()> {
-        if pending_history_lines.is_empty() {
-            return Ok(());
-        }
-
-        for batch in pending_history_lines.iter() {
-            let mode = if is_zellij && batch.wrap_policy == HistoryLineWrapPolicy::Terminal {
-                InsertHistoryMode::ZellijRaw
-            } else {
-                InsertHistoryMode::Standard
-            };
-            if mode == InsertHistoryMode::Standard {
-                inline_viewport.append_standard_history(
-                    terminal,
-                    &batch.lines,
-                    batch.wrap_policy,
-                )?;
-                continue;
-            }
-            crate::insert_history::insert_history_hyperlink_lines_with_mode_and_wrap_policy(
-                terminal,
-                &batch.lines,
-                mode,
-                batch.wrap_policy,
-            )?;
-        }
-        pending_history_lines.clear();
-        Ok(())
     }
 
     pub fn draw(
@@ -976,11 +955,10 @@ impl Tui {
                 terminal.set_viewport_area(area);
             }
 
-            Self::flush_pending_history_lines(
+            self.inline_viewport.flush_pending_history_lines(
                 terminal,
                 &mut self.pending_history_lines,
                 self.is_zellij,
-                &mut self.inline_viewport,
             )?;
 
             // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
@@ -1080,6 +1058,10 @@ impl Tui {
 
         ensure_virtual_terminal_processing()?;
 
+        let prepared_transcript_replay = self
+            .inline_viewport
+            .prepare_pending_transcript_replay(screen_size.width, self.is_zellij);
+
         stdout().sync_update(|_| {
             #[cfg(unix)]
             if let Some(prepared) = prepared_resume.take() {
@@ -1087,10 +1069,13 @@ impl Tui {
             }
 
             let terminal = &mut self.terminal;
+            self.inline_viewport.begin_transcript_replay(terminal)?;
+            let transcript_replay_pending = self.inline_viewport.has_pending_transcript_replay();
             let flush_before_viewport_update = self
                 .inline_viewport
                 .pending_history_precedes_resize(height, screen_size, terminal.viewport_area.top());
-            let had_pending_history = !self.pending_history_lines.is_empty();
+            let had_pending_history =
+                transcript_replay_pending || !self.pending_history_lines.is_empty();
 
             // A zero- or one-row history region cannot isolate raw history writes from the
             // viewport, so replayed rows can leave stale cells inside the composer.
@@ -1098,11 +1083,10 @@ impl Tui {
             if flush_before_viewport_update {
                 history_can_overlap_viewport =
                     !self.pending_history_lines.is_empty() && terminal.viewport_area.top() <= 1;
-                Self::flush_pending_history_lines(
+                self.inline_viewport.flush_pending_history_lines(
                     terminal,
                     &mut self.pending_history_lines,
                     self.is_zellij,
-                    &mut self.inline_viewport,
                 )?;
             }
 
@@ -1110,13 +1094,15 @@ impl Tui {
                 self.inline_viewport
                     .update_for_resize_reflow(terminal, height, screen_size)?;
 
-            history_can_overlap_viewport |=
-                !self.pending_history_lines.is_empty() && terminal.viewport_area.top() <= 1;
-            Self::flush_pending_history_lines(
+            self.inline_viewport
+                .write_prepared_transcript_replay(terminal, prepared_transcript_replay.as_ref())?;
+            history_can_overlap_viewport |= (transcript_replay_pending
+                || !self.pending_history_lines.is_empty())
+                && terminal.viewport_area.top() <= 1;
+            self.inline_viewport.flush_pending_history_lines(
                 terminal,
                 &mut self.pending_history_lines,
                 self.is_zellij,
-                &mut self.inline_viewport,
             )?;
 
             let viewport_was_cleared = if had_pending_history {
@@ -1149,8 +1135,10 @@ impl Tui {
 
             self.inline_viewport
                 .reconcile_after_draw(terminal, covered_history_policy)?;
-            Ok(())
-        })?
+            Ok::<(), io::Error>(())
+        })??;
+        self.inline_viewport.complete_transcript_replay();
+        Ok(())
     }
 
     fn pending_viewport_area(&mut self, screen_size: Size) -> Result<Option<Rect>> {

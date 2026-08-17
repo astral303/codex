@@ -11,7 +11,9 @@ use crate::custom_terminal::Terminal;
 use crate::insert_history::HistoryLineWrapPolicy;
 use crate::insert_history::HistoryTailReplacement;
 use crate::insert_history::InsertHistoryMode;
-use crate::insert_history::insert_history_hyperlink_lines_with_mode_and_wrap_policy;
+use crate::insert_history::PreparedHistoryLines;
+use crate::insert_history::insert_prepared_history_hyperlink_lines_with_mode;
+use crate::insert_history::prepare_history_hyperlink_lines;
 use crate::insert_history::wrap_history_hyperlink_lines;
 use crate::insert_history::write_history_line;
 use crate::terminal_hyperlinks::HyperlinkLine;
@@ -39,11 +41,25 @@ pub(crate) fn append_history_hyperlink_lines_at_placement<B>(
 where
     B: Backend<Error = io::Error> + Write,
 {
-    let viewport_top = terminal.viewport_area.top();
     let wrap_width = usize::from(terminal.viewport_area.width.max(1));
-    let (prepared_lines, prepared_rows) =
-        wrap_history_hyperlink_lines(lines, wrap_width, wrap_policy);
-    let appended_rows = u16::try_from(prepared_rows).unwrap_or(u16::MAX);
+    let prepared = prepare_history_hyperlink_lines(lines, wrap_width, wrap_policy);
+    append_prepared_history_hyperlink_lines_at_placement(terminal, &prepared, placement)
+}
+
+pub(crate) fn append_prepared_history_hyperlink_lines_at_placement<B>(
+    terminal: &mut Terminal<B>,
+    prepared: &PreparedHistoryLines,
+    placement: &mut InlineHistoryPlacement,
+) -> io::Result<()>
+where
+    B: Backend<Error = io::Error> + Write,
+{
+    let viewport_top = terminal.viewport_area.top();
+    debug_assert_eq!(
+        prepared.wrap_width,
+        usize::from(terminal.viewport_area.width.max(1))
+    );
+    let appended_rows = u16::try_from(prepared.row_count).unwrap_or(u16::MAX);
     if appended_rows == 0 {
         return Ok(());
     }
@@ -58,24 +74,24 @@ where
         } else {
             InsertHistoryMode::Standard
         };
-        insert_history_hyperlink_lines_with_mode_and_wrap_policy(
-            terminal,
-            lines,
-            mode,
-            wrap_policy,
-        )?;
+        insert_prepared_history_hyperlink_lines_with_mode(terminal, prepared, mode)?;
         placement.record_scrolling_append(
             terminal.viewport_area.top(),
             appended_rows,
-            &prepared_lines,
-            wrap_width,
+            &prepared.lines,
+            prepared.wrap_width,
         );
         sync_terminal_visible_history_rows(terminal, placement);
         return Ok(());
     }
 
-    paint_history_into_gap(terminal, history_bottom, &prepared_lines, wrap_width)?;
-    placement.record_gap_append(appended_rows, &prepared_lines, wrap_width);
+    paint_history_into_gap(
+        terminal,
+        history_bottom,
+        &prepared.lines,
+        prepared.wrap_width,
+    )?;
+    placement.record_gap_append(appended_rows, &prepared.lines, prepared.wrap_width);
     sync_terminal_visible_history_rows(terminal, placement);
     Ok(())
 }
