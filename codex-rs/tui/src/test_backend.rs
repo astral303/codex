@@ -20,6 +20,7 @@ use ratatui::layout::Size;
 /// - getting the cursor position
 pub struct VT100Backend {
     crossterm_backend: CrosstermBackend<vt100::Parser>,
+    write_calls: usize,
 }
 
 impl VT100Backend {
@@ -36,16 +37,26 @@ impl VT100Backend {
                 width,
                 scrollback_len,
             )),
+            write_calls: 0,
         }
     }
 
     pub fn vt100(&self) -> &vt100::Parser {
         self.crossterm_backend.writer()
     }
+
+    /// Number of `Write::write` calls the backend has received.
+    // Only the unit tests count writes; tests/all.rs also compiles this module
+    // via #[path], where the accessor is unused.
+    #[allow(dead_code)]
+    pub fn write_calls(&self) -> usize {
+        self.write_calls
+    }
 }
 
 impl Write for VT100Backend {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.write_calls += 1;
         self.crossterm_backend.writer_mut().write(buf)
     }
 
