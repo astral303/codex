@@ -131,12 +131,15 @@ where
     let wrap_width = area.width.max(1) as usize;
     let (wrapped, wrapped_rows) = wrap_history_hyperlink_lines(lines, wrap_width, wrap_policy);
     let wrapped_lines = wrapped_rows as u16;
+    // Build the row output in memory before writing it to the backend. In particular, this
+    // prevents line-buffered stdout from flushing once per history row.
+    let mut output = Vec::new();
     match mode {
         InsertHistoryMode::FullScreen => {
             // The existing viewport is immediately replaced in the same draw pass. Clear it
             // before terminal scrolling can move composer contents into scrollback.
             terminal.clear_after_position(area.as_position())?;
-            let writer = terminal.backend_mut();
+            let writer = &mut output;
             queue!(writer, MoveTo(/*x*/ 0, area.top()))?;
             for (index, line) in wrapped.iter().enumerate() {
                 if index > 0 {
@@ -163,7 +166,7 @@ where
             }
         }
         InsertHistoryMode::Standard => {
-            let writer = terminal.backend_mut();
+            let writer = &mut output;
             let cursor_top = if area.bottom() < screen_size.height {
                 // If the viewport is not at the bottom of the screen, scroll it down to make room.
                 // Don't scroll it past the bottom of the screen.
@@ -216,6 +219,8 @@ where
             queue!(writer, MoveTo(last_cursor_pos.x, last_cursor_pos.y))?;
         }
     }
+
+    terminal.backend_mut().write_all(&output)?;
 
     if should_update_area {
         terminal.set_viewport_area(area);
@@ -571,6 +576,28 @@ mod tests {
         assert!(
             saw_colored,
             "expected at least one colored cell in vt100 output"
+        );
+    }
+
+    #[test]
+    fn multi_row_insertion_reaches_backend_as_single_write() {
+        let width: u16 = 40;
+        let height: u16 = 10;
+        let backend = VT100Backend::new(width, height);
+        let mut term = crate::custom_terminal::Terminal::with_options(backend).expect("terminal");
+        term.set_viewport_area(Rect::new(0, height - 1, width, 1));
+
+        let lines: Vec<Line<'static>> = (0..5)
+            .map(|index| Line::from(format!("history row {index}")))
+            .collect();
+        let writes_before = term.backend().write_calls();
+        insert_history_lines(&mut term, lines).expect("insert history lines");
+
+        assert_eq!(
+            term.backend().write_calls() - writes_before,
+            1,
+            "history insertion must reach the backend as one write so line-buffered \
+             stdout cannot flush once per row"
         );
     }
 
