@@ -154,6 +154,10 @@ pub struct TuiComposerKeymap {
     pub history_search_previous: Option<KeybindingsSpec>,
     /// Move to the next match in reverse history search.
     pub history_search_next: Option<KeybindingsSpec>,
+    /// Undo the most recent composer draft edit.
+    pub undo: Option<KeybindingsSpec>,
+    /// Redo the most recently undone composer draft edit.
+    pub redo: Option<KeybindingsSpec>,
 }
 
 /// Editor context keybindings for text editing inside text areas.

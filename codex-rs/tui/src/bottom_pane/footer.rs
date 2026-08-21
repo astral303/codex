@@ -114,6 +114,8 @@ pub(crate) struct FooterKeyHints {
     pub(crate) edit_previous: Option<ShortcutHint>,
     pub(crate) show_transcript: Option<ShortcutHint>,
     pub(crate) history_search: Option<ShortcutHint>,
+    pub(crate) undo: Option<ShortcutHint>,
+    pub(crate) redo: Option<ShortcutHint>,
     pub(crate) reasoning_down: Option<ShortcutHint>,
     pub(crate) reasoning_up: Option<ShortcutHint>,
 }
@@ -129,6 +131,8 @@ impl FooterKeyHints {
             edit_previous: Some(key_hint::plain(KeyCode::Esc).into()),
             show_transcript: Some(key_hint::ctrl(KeyCode::Char('t')).into()),
             history_search: Some(key_hint::ctrl(KeyCode::Char('r')).into()),
+            undo: Some(crate::keymap::default_composer_undo_binding().into()),
+            redo: Some(crate::keymap::default_composer_redo_binding().into()),
             reasoning_down: Some(key_hint::alt(KeyCode::Char(',')).into()),
             reasoning_up: Some(key_hint::alt(KeyCode::Char('.')).into()),
         }
@@ -894,6 +898,8 @@ fn shortcut_overlay_lines(state: ShortcutsState) -> Vec<Line<'static>> {
     let mut external_editor = Line::from("");
     let mut edit_previous = Line::from("");
     let mut history_search = Line::from("");
+    let mut undo = Line::from("");
+    let mut redo = Line::from("");
     let mut quit = Line::from("");
     let mut show_transcript = Line::from("");
     let mut change_mode = Line::from("");
@@ -912,6 +918,8 @@ fn shortcut_overlay_lines(state: ShortcutsState) -> Vec<Line<'static>> {
                 ShortcutId::ExternalEditor => external_editor = text,
                 ShortcutId::EditPrevious => edit_previous = text,
                 ShortcutId::HistorySearch => history_search = text,
+                ShortcutId::Undo => undo = text,
+                ShortcutId::Redo => redo = text,
                 ShortcutId::Quit => quit = text,
                 ShortcutId::ShowTranscript => show_transcript = text,
                 ShortcutId::ChangeMode => change_mode = text,
@@ -931,6 +939,8 @@ fn shortcut_overlay_lines(state: ShortcutsState) -> Vec<Line<'static>> {
         external_editor,
         edit_previous,
         history_search,
+        undo,
+        redo,
         quit,
         reasoning_down,
         reasoning_up,
@@ -1021,6 +1031,8 @@ enum ShortcutId {
     ExternalEditor,
     EditPrevious,
     HistorySearch,
+    Undo,
+    Redo,
     Quit,
     ShowTranscript,
     ChangeMode,
@@ -1081,6 +1093,8 @@ impl ShortcutDescriptor {
             ShortcutId::EditPrevious => state.key_hints.edit_previous,
             ShortcutId::ShowTranscript => state.key_hints.show_transcript,
             ShortcutId::HistorySearch => state.key_hints.history_search,
+            ShortcutId::Undo => state.key_hints.undo,
+            ShortcutId::Redo => state.key_hints.redo,
             ShortcutId::ReasoningDown => state.key_hints.reasoning_down,
             ShortcutId::ReasoningUp => state.key_hints.reasoning_up,
             ShortcutId::Commands
@@ -1220,6 +1234,18 @@ const SHORTCUTS: &[ShortcutDescriptor] = &[
         }],
         prefix: "",
         label: " search history",
+    },
+    ShortcutDescriptor {
+        id: ShortcutId::Undo,
+        bindings: &[],
+        prefix: "",
+        label: " undo",
+    },
+    ShortcutDescriptor {
+        id: ShortcutId::Redo,
+        bindings: &[],
+        prefix: "",
+        label: " redo",
     },
     ShortcutDescriptor {
         id: ShortcutId::Quit,

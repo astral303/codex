@@ -9,8 +9,8 @@ use std::time::Instant;
 use crossterm::event::KeyEvent;
 
 use super::BottomPane;
-use super::ComposerDraftSnapshot;
 use super::HistoryEntry;
+use super::StartupDraftSnapshot;
 use crate::key_hint::KeyBindingListExt;
 
 impl BottomPane {
@@ -54,6 +54,13 @@ impl BottomPane {
         .any(|bindings| bindings.is_pressed(key_event))
     }
 
+    /// Route an approved startup shortcut directly to the textarea editor.
+    pub(crate) fn handle_startup_editor_key(&mut self, key_event: KeyEvent) {
+        if self.composer.handle_startup_editor_key(key_event) {
+            self.request_redraw();
+        }
+    }
+
     /// Enable Vim without interrupting an in-progress startup draft.
     pub(crate) fn enable_vim_in_insert_mode(&mut self) {
         self.composer.enable_vim_in_insert_mode();
@@ -67,7 +74,7 @@ impl BottomPane {
     }
 
     /// Capture draft content together with the activity timestamp used by delayed approvals.
-    pub(crate) fn composer_draft_snapshot(&self) -> ComposerDraftSnapshot {
+    pub(crate) fn composer_draft_snapshot(&self) -> StartupDraftSnapshot {
         let mut draft = self.composer.draft_snapshot();
         draft.last_composer_activity_at = self.last_composer_activity_at;
         draft
