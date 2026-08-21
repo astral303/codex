@@ -1068,6 +1068,9 @@ impl App {
                     self.active_thread_id = self.chat_widget.thread_id();
                 }
                 self.chat_widget.prepare_local_op_submission(&op);
+                if matches!(&op, AppCommand::Interrupt) {
+                    self.chat_widget.apply_accepted_interrupt_cleanup();
+                }
                 let result = self.submit_active_thread_op(app_server, op).await;
                 if result.is_err()
                     && let Some(delivery_id) = realtime_speech_delivery_id
@@ -1095,14 +1098,16 @@ impl App {
                         chat_widget
                             .set_queue_autosend_suppressed(/*suppressed*/ true);
                     }
-                    let handled = is_user_turn
+                    let turn_start_rejected = is_user_turn
                         && (matches!(
                             err.downcast_ref::<TypedRequestError>(),
                             Some(TypedRequestError::Server { method, .. })
                                 if method == "turn/start"
-                        ) || unsupported_permissions)
-                        && chat_widget
+                        ) || unsupported_permissions);
+                    if turn_start_rejected {
+                        chat_widget
                             .handle_turn_start_rejection(format!("Failed to start turn: {err:#}"));
+                    }
                     if is_realtime_conversation {
                         let message = format!("Voice conversation failed: {err:#}");
                         if is_realtime_stop {
@@ -1115,7 +1120,7 @@ impl App {
                             chat_widget.on_realtime_error(message);
                         }
                         tracing::error!(error = ?err, "realtime conversation request failed");
-                    } else if handled {
+                    } else if turn_start_rejected {
                         tracing::error!(error = ?err, "failed to start turn through app server");
                     } else {
                         return Err(err);

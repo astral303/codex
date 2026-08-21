@@ -2451,6 +2451,7 @@ async fn reconnect_keeps_queue_paused_after_pending_compact() {
     let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.prepare_local_op_submission(&AppCommand::Compact);
+    chat.reserve_user_turn_pending_start();
     chat.queue_user_message("follow-up".into());
     chat.pause_for_disconnect();
     let mut input = chat.capture_thread_input_state();
