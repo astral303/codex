@@ -269,6 +269,7 @@ impl ChatWidget {
             interrupted_turn_notice_mode: InterruptedTurnNoticeMode::Default,
             input_queue: InputQueueState::default(),
             thread_stream_disconnected: false,
+            input_paused: false,
             safety_buffering_prompt: None,
             safety_buffering_source: UserMessageSource::Prompt,
             chat_keymap,

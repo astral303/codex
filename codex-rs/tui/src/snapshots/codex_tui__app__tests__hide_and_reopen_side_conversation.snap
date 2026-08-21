@@ -34,13 +34,13 @@ parent-27                                                      │
 parent-28                                                      │
                                                                │child-28
 parent-29                                                      │
-                                                               │child-29
+                                                               │Working (0s • esc to interrupt)
                                                                │
                                                                │
 › parent draft-                                                │› child draft!
                                                                │
   GPT-6.2-Sol default                                          │  GPT-6.2-Sol default · Agent
-                                                               │
+                                                               │  tab to queue
 
 99 columns, reopened
  Side chat           ×                                                                          +
@@ -54,10 +54,10 @@ child-27
 
 child-28
 
-child-29
+Working (0s • esc to interrupt)
 
 
 › child draft!
 
   GPT-6.2-Sol default · Agent
-  Side from main thread · ⌃/ to switch · ⌃c to close
+  tab to queue message · Side from main thread · ⌃/ to switch · ⌃c to close
