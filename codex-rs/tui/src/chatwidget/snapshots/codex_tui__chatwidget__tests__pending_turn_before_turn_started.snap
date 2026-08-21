@@ -1,0 +1,12 @@
+---
+source: tui/src/chatwidget/tests/pending_turn_tests.rs
+assertion_line: 25
+expression: normalized_backend_snapshot(terminal.backend())
+---
+"                                        "
+"• Working (0s • esc to interrupt)       "
+"                                        "
+"                                        "
+"› Ask Codex to do anything              "
+"                                        "
+"  gpt-5 default · /tmp/project          "

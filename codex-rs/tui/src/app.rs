@@ -224,6 +224,7 @@ mod history_ui;
 mod input;
 mod loaded_threads;
 mod pending_interactive_replay;
+mod pending_turn;
 mod permission_shortcuts;
 mod pets;
 mod platform_actions;
