@@ -150,31 +150,17 @@ async fn service_tier_commands_lowercase_catalog_names() {
 }
 
 #[tokio::test]
-async fn slash_compact_eagerly_queues_follow_up_before_turn_start() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+async fn slash_compact_defers_pending_rows_to_app_event_dispatch() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.dispatch_command(SlashCommand::Compact);
 
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.input_queue.user_turn_pending_start);
+    assert!(!chat.bottom_pane.is_task_running());
     match rx.try_recv() {
         Ok(AppEvent::CodexOp(Op::Compact)) => {}
         other => panic!("expected compact op to be submitted, got {other:?}"),
     }
-
-    chat.bottom_pane.set_composer_text(
-        "queued before compact turn start".to_string(),
-        Vec::new(),
-        Vec::new(),
-    );
-    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert!(chat.input_queue.pending_steers.is_empty());
-    assert_eq!(chat.input_queue.queued_user_messages.len(), 1);
-    assert_eq!(
-        chat.input_queue.queued_user_messages.front().unwrap().text,
-        "queued before compact turn start"
-    );
-    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
 }
 
 #[tokio::test]
@@ -2615,6 +2601,10 @@ async fn slash_clear_after_ctrl_c_keeps_stashed_draft_recallable() {
 
     submit_composer_text(&mut chat, "ok");
     assert_eq!(next_add_to_history_event(&mut rx), "ok");
+    chat.on_task_started();
+    chat.on_task_complete(
+        /*last_agent_message*/ None, /*duration_ms*/ None, /*from_replay*/ false,
+    );
 
     let stashed_draft = "explain why history recall lost this draft";
 
