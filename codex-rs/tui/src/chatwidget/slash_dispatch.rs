@@ -267,10 +267,6 @@ impl ChatWidget {
                     return;
                 }
                 self.clear_token_usage();
-                if !self.bottom_pane.is_task_running() {
-                    self.bottom_pane.set_task_running(/*running*/ true);
-                }
-                self.input_queue.user_turn_pending_start = true;
                 self.app_event_tx.compact();
             }
             SlashCommand::Review => {

@@ -238,10 +238,6 @@ impl AppCommand {
     pub(crate) fn approve_guardian_denied_action(event: GuardianAssessmentEvent) -> Self {
         Self::ApproveGuardianDeniedAction { event }
     }
-
-    pub(crate) fn is_review(&self) -> bool {
-        matches!(self, Self::Review { .. })
-    }
 }
 
 impl From<&AppCommand> for AppCommand {
