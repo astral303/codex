@@ -389,6 +389,7 @@ mod model_popups;
 mod notifications;
 use self::notifications::Notification;
 mod permission_popups;
+mod permission_shortcuts;
 mod permissions_menu;
 pub(crate) use self::permissions_menu::auto_review_available;
 pub(crate) use self::permissions_menu::cyber_model_approval_reviewer;
@@ -696,6 +697,7 @@ pub(crate) struct ChatWidget {
     safety_buffering_prompt: Option<UserMessage>,
     /// Main chat-surface bindings resolved from `tui.keymap.chat`.
     chat_keymap: ChatKeymap,
+    permission_shortcut_pending: bool,
     /// Keybinding to show for popping the most-recently queued message back
     /// into the composer. This may differ from the first configured binding
     /// when the default set includes a terminal-specific fallback.
@@ -1816,10 +1818,14 @@ impl ChatWidget {
             self.add_error_message(PARENT_OWNED_INPUT_MESSAGE.to_string());
             return false;
         }
-        self.prepare_local_op_submission(&op);
-        if op.is_review() && !self.bottom_pane.is_task_running() {
-            self.bottom_pane.set_task_running(/*running*/ true);
-        }
+        let starts_turn = matches!(
+            &op,
+            AppCommand::UserTurn { .. }
+                | AppCommand::Compact
+                | AppCommand::Review { .. }
+                | AppCommand::RunUserShellCommand { .. }
+        );
+        let is_interrupt = matches!(op, AppCommand::Interrupt);
         match &self.codex_op_target {
             CodexOpTarget::Direct(codex_op_tx) => {
                 crate::session_log::log_outbound_op(&op);
@@ -1827,9 +1833,15 @@ impl ChatWidget {
                     tracing::error!("failed to submit op: {e}");
                     return false;
                 }
+                if starts_turn {
+                    self.reserve_user_turn_pending_start();
+                }
+                if is_interrupt {
+                    self.apply_accepted_interrupt_cleanup();
+                }
             }
             CodexOpTarget::AppEvent => {
-                self.app_event_tx.send(AppEvent::CodexOp(op));
+                return self.app_event_tx.enqueue_codex_op(op);
             }
         }
         true
@@ -1844,16 +1856,8 @@ impl ChatWidget {
             .send(AppEvent::AppendMessageHistoryEntry { thread_id, text });
     }
 
-    pub(crate) fn prepare_local_op_submission(&mut self, op: &AppCommand) {
-        if matches!(
-            op,
-            AppCommand::Compact
-                | AppCommand::Review { .. }
-                | AppCommand::RunUserShellCommand { .. }
-        ) {
-            self.input_queue.user_turn_pending_start = true;
-        }
-        if matches!(op, AppCommand::Interrupt) && self.turn_lifecycle.agent_turn_running {
+    pub(crate) fn apply_accepted_interrupt_cleanup(&mut self) {
+        if self.turn_lifecycle.agent_turn_running {
             if let Some(controller) = self.stream_controller.as_mut() {
                 controller.clear_queue();
             }

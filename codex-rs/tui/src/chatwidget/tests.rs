@@ -245,6 +245,10 @@ mod history_replay;
 mod mcp_startup;
 #[path = "tests/misalignment_policy_tests.rs"]
 mod misalignment_policy;
+#[path = "tests/pending_turn_tests.rs"]
+mod pending_turn;
+#[path = "tests/permission_shortcuts_tests.rs"]
+mod permission_shortcuts_tests;
 mod permissions;
 mod plan_mode;
 #[path = "tests/plugin_catalog_tests.rs"]
