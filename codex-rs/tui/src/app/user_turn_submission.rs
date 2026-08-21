@@ -46,6 +46,7 @@ pub(super) async fn try_submit_user_turn(
     };
     let original_active = app.active_turn_id_for_thread(thread_id).await;
     let mut active = original_active.clone();
+    let reservation = app.chat_widget.reserve_user_turn_pending_start();
     let preflight = |model: &str| {
         let enabled = app.chat_widget.daybreak_enabled
             && !app.chat_widget.side_conversation_active()
@@ -68,6 +69,17 @@ pub(super) async fn try_submit_user_turn(
             start_settings,
         )
         .await;
+    // Only a started turn sends the TurnStarted that releases the reservation.
+    if !matches!(
+        &result,
+        Ok((
+            UserMessageAdmission::StartResponse(_) | UserMessageAdmission::Started(_),
+            _
+        ))
+    ) {
+        app.chat_widget
+            .rollback_user_turn_pending_start(reservation);
+    }
     if active != original_active
         && let Some(channel) = app.thread_event_channels.get(&thread_id)
     {
@@ -106,9 +118,7 @@ pub(super) async fn try_submit_user_turn(
             }
         }
         Err(UserMessageSubmissionFailure::Preflight(message)) if !ordinary => {
-            if !app.chat_widget.handle_turn_start_rejection(message.clone()) {
-                app.chat_widget.add_error_message(message);
-            }
+            app.chat_widget.handle_turn_start_rejection(message);
         }
         Err(UserMessageSubmissionFailure::Preflight(message)) => {
             app.chat_widget

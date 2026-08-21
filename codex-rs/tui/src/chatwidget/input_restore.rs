@@ -378,6 +378,9 @@ impl ChatWidget {
         self.input_queue
             .rejected_steer_history_records
             .push_back(history);
+        // The rejected steer reserved a pending start when it was sent; the running turn already
+        // owns the status indicator, and the re-queued steer must not block the next send.
+        self.clear_user_turn_pending_start();
         self.refresh_pending_input_preview();
         self.update_task_running_state();
         true
@@ -763,6 +766,7 @@ impl ChatWidget {
             .as_ref()
             .and_then(|state| state.provider_error.clone());
         let preserve_in_flight_turn = restore_mode.preserve_in_flight_turn;
+        self.input_paused = false;
         let restored_task_running =
             preserve_in_flight_turn && input_state.as_ref().is_some_and(|state| state.task_running);
         if let Some(input_state) = input_state {
