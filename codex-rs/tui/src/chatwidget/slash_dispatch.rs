@@ -277,9 +277,6 @@ impl ChatWidget {
                     return;
                 }
                 self.clear_token_usage();
-                if !self.bottom_pane.is_task_running() {
-                    self.bottom_pane.set_task_running(/*running*/ true);
-                }
                 self.bottom_pane.ensure_status_indicator();
                 self.set_status(
                     compaction::COMPACTION_HEADER.to_string(),
@@ -287,7 +284,6 @@ impl ChatWidget {
                     StatusDetailsCapitalization::Preserve,
                     STATUS_DETAILS_DEFAULT_MAX_LINES,
                 );
-                self.input_queue.user_turn_pending_start = true;
                 self.app_event_tx.compact();
             }
             SlashCommand::Recap => {

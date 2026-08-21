@@ -230,6 +230,7 @@ mod model_defaults;
 mod new_session;
 pub(crate) use new_session::has_launch_setting;
 mod pending_interactive_replay;
+mod pending_turn;
 mod permission_shortcuts;
 mod pets;
 mod platform_actions;
