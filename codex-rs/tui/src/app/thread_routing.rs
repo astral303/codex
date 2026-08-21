@@ -4,6 +4,7 @@
 //! channels, submits thread-scoped operations through the app server, and replays buffered events
 //! when the visible thread changes.
 
+use super::pending_turn::dispatch_starting_request;
 use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
 use crate::app_event::ThreadTitleDestination;
@@ -836,12 +837,7 @@ impl App {
                     ) {
                         Ok(program) => program,
                         Err(message) => {
-                            if !self
-                                .chat_widget
-                                .handle_turn_start_rejection(message.clone())
-                            {
-                                self.chat_widget.add_error_message(message);
-                            }
+                            self.chat_widget.handle_turn_start_rejection(message);
                             return Ok(true);
                         }
                     };
@@ -894,8 +890,11 @@ impl App {
                         explicit_profile
                             .and_then(RuntimePermissionProfileOverride::turn_permission_profile),
                     );
-                    let response = app_server
-                        .turn_start(
+                    let workspace_roots =
+                        config.permissions.user_visible_workspace_roots().to_vec();
+                    let response = dispatch_starting_request(
+                        &mut self.chat_widget,
+                        app_server.turn_start(
                             thread_id,
                             client_user_message_id.clone(),
                             items.to_vec(),
@@ -903,7 +902,7 @@ impl App {
                             turn_approval_policy,
                             turn_approvals_reviewer,
                             permissions_override,
-                            config.permissions.user_visible_workspace_roots(),
+                            &workspace_roots,
                             model.to_string(),
                             effort.clone(),
                             *summary,
@@ -911,8 +910,9 @@ impl App {
                             collaboration_mode.clone(),
                             final_output_json_schema.clone(),
                             cyber_access_program.map(Into::into),
-                        )
-                        .await?;
+                        ),
+                    )
+                    .await?;
                     if self.active_thread_id == Some(thread_id)
                         && self.chat_widget.thread_id() == Some(thread_id)
                     {
@@ -936,7 +936,11 @@ impl App {
                 Ok(true)
             }
             AppCommand::Compact => {
-                app_server.thread_compact_start(thread_id).await?;
+                dispatch_starting_request(
+                    &mut self.chat_widget,
+                    app_server.thread_compact_start(thread_id),
+                )
+                .await?;
                 Ok(true)
             }
             AppCommand::SetThreadName { name } => {
@@ -947,7 +951,11 @@ impl App {
                 Ok(true)
             }
             AppCommand::Review { target } => {
-                let response = app_server.review_start(thread_id, target.clone()).await?;
+                let response = dispatch_starting_request(
+                    &mut self.chat_widget,
+                    app_server.review_start(thread_id, target.clone()),
+                )
+                .await?;
                 let review_thread_id = ThreadId::from_string(&response.review_thread_id)
                     .wrap_err("review/start returned invalid review thread id")?;
                 let store = Arc::clone(&self.ensure_thread_channel(review_thread_id).store);
@@ -1020,9 +1028,11 @@ impl App {
                 Ok(true)
             }
             AppCommand::RunUserShellCommand { command } => {
-                app_server
-                    .thread_shell_command(thread_id, command.to_string())
-                    .await?;
+                dispatch_starting_request(
+                    &mut self.chat_widget,
+                    app_server.thread_shell_command(thread_id, command.to_string()),
+                )
+                .await?;
                 Ok(true)
             }
             AppCommand::ReloadUserConfig => {
