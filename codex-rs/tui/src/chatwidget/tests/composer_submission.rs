@@ -2450,7 +2450,7 @@ async fn reconnect_holds_only_recovered_input_until_manually_edited() {
             assert_no_submit_op(&mut ops);
             chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
             assert_matches!(next_submit_op(&mut ops), Op::UserTurn { .. });
-            chat.input_queue.user_turn_pending_start = false;
+            chat.clear_user_turn_pending_start();
         }
         chat.input_queue
             .queued_user_messages
