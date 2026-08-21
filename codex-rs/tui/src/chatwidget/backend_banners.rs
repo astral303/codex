@@ -216,7 +216,10 @@ impl ChatWidget {
         if !self.waiting_for_luna_reserve() {
             return false;
         }
-        if self.input_queue.user_turn_pending_start
+        // The pending-start reservation is taken only after the request is accepted, so it is
+        // not yet held here. The retained submission plus an idle turn lifecycle marks the same
+        // pre-start window.
+        if !self.turn_lifecycle.agent_turn_running
             && let Some(prompt) = self.safety_buffering_prompt.take()
         {
             self.finalize_turn();
