@@ -2436,6 +2436,7 @@ async fn reconnect_resumes_unsent_input_and_reconciles_confirmed_submissions() {
         if pending_start {
             chat.prepare_safety_recourse_rewrite("first message")
                 .unwrap();
+            chat.reserve_user_turn_pending_start();
         } else {
             handle_turn_started(&mut chat, "turn-1");
             chat.submit_user_message("first message".into());
@@ -2522,6 +2523,7 @@ async fn reconnect_keeps_queue_paused_after_pending_compact() {
     let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.prepare_local_op_submission(&AppCommand::Compact);
+    chat.reserve_user_turn_pending_start();
     chat.queue_user_message("follow-up".into());
     chat.pause_for_disconnect();
     let mut input = chat.capture_thread_input_state();
