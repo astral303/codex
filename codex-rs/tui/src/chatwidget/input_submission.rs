@@ -407,9 +407,6 @@ impl ChatWidget {
             return (false, None);
         }
         self.dismiss_backend_banner_for_new_turn();
-        if render_in_history {
-            self.input_queue.user_turn_pending_start = true;
-        }
 
         // Persist the submitted text to cross-session message history. Mentions are encoded into
         // placeholder syntax so recall can reconstruct the mention bindings in a future session.

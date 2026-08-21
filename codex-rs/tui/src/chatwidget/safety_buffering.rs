@@ -67,7 +67,7 @@ impl ChatWidget {
         self.last_rendered_user_message_display = None;
         self.finalize_turn();
         self.safety_buffering_prompt = Some(prompt);
-        self.input_queue.user_turn_pending_start = true;
+        self.reserve_user_turn_pending_start();
     }
 
     pub(crate) fn commit_safety_buffered_retry_submission(&mut self, display: UserMessageDisplay) {
@@ -75,8 +75,8 @@ impl ChatWidget {
     }
 
     pub(crate) fn cancel_safety_buffered_retry_submission(&mut self) {
-        self.input_queue.user_turn_pending_start = false;
         self.clear_safety_buffering();
+        self.clear_user_turn_pending_start();
     }
 
     pub(super) fn on_model_safety_buffering_updated(
