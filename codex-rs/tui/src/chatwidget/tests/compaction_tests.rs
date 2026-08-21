@@ -96,8 +96,20 @@ async fn manual_compaction_shows_status_before_backend_events() {
         "manual_compaction_pending",
         normalize_compaction_snapshot(render_bottom_popup(&chat, /*width*/ 80))
     );
-    assert!(chat.handle_turn_start_rejection("Could not start compaction".to_string()));
+    chat.handle_turn_start_rejection("Could not start compaction".to_string());
     assert!(!chat.bottom_pane.status_indicator_visible());
+}
+
+#[tokio::test]
+async fn rejecting_a_start_keeps_the_indicator_of_a_running_compaction() {
+    let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.dispatch_command(SlashCommand::Compact);
+    handle_turn_started(&mut chat, "turn-1");
+    assert!(chat.bottom_pane.status_indicator_visible());
+
+    chat.handle_turn_start_rejection("Could not start another turn".to_string());
+
+    assert!(chat.bottom_pane.status_indicator_visible());
 }
 
 #[tokio::test]

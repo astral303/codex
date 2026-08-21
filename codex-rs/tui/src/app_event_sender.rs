@@ -32,6 +32,15 @@ impl AppEventSender {
     /// Send an event to the app event channel. If it fails, we swallow the
     /// error and log it.
     pub(crate) fn send(&self, event: AppEvent) {
+        self.enqueue_event(event);
+    }
+
+    /// Enqueue a Codex operation and report whether the local transport accepted it.
+    pub(crate) fn enqueue_codex_op(&self, op: AppCommand) -> bool {
+        self.enqueue_event(AppEvent::CodexOp(op))
+    }
+
+    fn enqueue_event(&self, event: AppEvent) -> bool {
         // Record inbound events for high-fidelity session replay.
         // Avoid double-logging Ops; those are logged at the point of submission.
         if !matches!(event, AppEvent::CodexOp(_)) {
@@ -39,36 +48,33 @@ impl AppEventSender {
         }
         if let Err(e) = self.app_event_tx.send(event) {
             tracing::error!("failed to send event: {e}");
+            return false;
         }
+        true
     }
 
     pub(crate) fn interrupt(&self) {
-        self.send(AppEvent::CodexOp(AppCommand::interrupt()));
+        self.enqueue_codex_op(AppCommand::interrupt());
     }
 
     pub(crate) fn compact(&self) {
-        self.send(AppEvent::CodexOp(AppCommand::compact()));
+        self.enqueue_codex_op(AppCommand::compact());
     }
 
     pub(crate) fn set_thread_name(&self, name: String) {
-        self.send(AppEvent::CodexOp(AppCommand::set_thread_name(name)));
+        self.enqueue_codex_op(AppCommand::set_thread_name(name));
     }
 
     pub(crate) fn review(&self, target: ReviewTarget) {
-        self.send(AppEvent::CodexOp(AppCommand::review(target)));
+        self.enqueue_codex_op(AppCommand::review(target));
     }
 
     pub(crate) fn list_skills(&self, cwds: Vec<PathBuf>, force_reload: bool) {
-        self.send(AppEvent::CodexOp(AppCommand::list_skills(
-            cwds,
-            force_reload,
-        )));
+        self.enqueue_codex_op(AppCommand::list_skills(cwds, force_reload));
     }
 
     pub(crate) fn user_input_answer(&self, id: String, response: ToolRequestUserInputResponse) {
-        self.send(AppEvent::CodexOp(AppCommand::user_input_answer(
-            id, response,
-        )));
+        self.enqueue_codex_op(AppCommand::user_input_answer(id, response));
     }
 
     pub(crate) fn exec_approval(

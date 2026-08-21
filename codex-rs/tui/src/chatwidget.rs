@@ -708,6 +708,10 @@ pub(crate) struct ChatWidget {
     // order.
     suppress_initial_user_message_submit: bool,
     input_queue: InputQueueState,
+    /// True from `pause_for_disconnect` or `pause_unavailable_thread` until input state is
+    /// restored. A pending-start reservation held across the pause cannot reach `TurnStarted`,
+    /// so it does not count as running work while this is set.
+    input_paused: bool,
     safety_buffering_prompt: Option<UserMessage>,
     /// Main chat-surface bindings resolved from `tui.keymap.chat`.
     chat_keymap: ChatKeymap,
@@ -1795,10 +1799,15 @@ impl ChatWidget {
             });
             return false;
         }
+        let starts_turn = matches!(
+            &op,
+            AppCommand::UserTurn { .. }
+                | AppCommand::Compact
+                | AppCommand::Review { .. }
+                | AppCommand::RunUserShellCommand { .. }
+        );
+        let is_interrupt = matches!(op, AppCommand::Interrupt);
         self.prepare_local_op_submission(&op);
-        if op.is_review() && !self.bottom_pane.is_task_running() {
-            self.bottom_pane.set_task_running(/*running*/ true);
-        }
         match &self.codex_op_target {
             CodexOpTarget::Direct(codex_op_tx) => {
                 crate::session_log::log_outbound_op(&op);
@@ -1806,9 +1815,15 @@ impl ChatWidget {
                     tracing::error!("failed to submit op: {e}");
                     return false;
                 }
+                if starts_turn {
+                    self.reserve_user_turn_pending_start();
+                }
+                if is_interrupt {
+                    self.apply_accepted_interrupt_cleanup();
+                }
             }
             CodexOpTarget::AppEvent => {
-                self.app_event_tx.send(AppEvent::CodexOp(op));
+                return self.app_event_tx.enqueue_codex_op(op);
             }
         }
         true
@@ -1823,6 +1838,7 @@ impl ChatWidget {
             .send(AppEvent::AppendMessageHistoryEntry { thread_id, text });
     }
 
+    /// Clear transcript state that a locally started command supersedes.
     pub(crate) fn prepare_local_op_submission(&mut self, op: &AppCommand) {
         if matches!(
             op,
@@ -1831,9 +1847,11 @@ impl ChatWidget {
                 | AppCommand::RunUserShellCommand { .. }
         ) {
             self.transcript.last_status_copy_targets = None;
-            self.input_queue.user_turn_pending_start = true;
         }
-        if matches!(op, AppCommand::Interrupt) && self.turn_lifecycle.agent_turn_running {
+    }
+
+    pub(crate) fn apply_accepted_interrupt_cleanup(&mut self) {
+        if self.turn_lifecycle.agent_turn_running {
             if let Some(controller) = self.stream_controller.as_mut() {
                 controller.clear_queue();
             }

@@ -481,6 +481,7 @@ impl ChatWidget {
         restore_mode: ThreadInputStateRestoreMode,
     ) {
         let preserve_in_flight_turn = restore_mode.preserve_in_flight_turn;
+        self.input_paused = false;
         let restored_task_running =
             preserve_in_flight_turn && input_state.as_ref().is_some_and(|state| state.task_running);
         if let Some(input_state) = input_state {

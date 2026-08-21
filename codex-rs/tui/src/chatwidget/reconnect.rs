@@ -9,6 +9,8 @@ impl ChatWidget {
         }
         self.input_queue.recovered_queue = true;
         self.input_queue.suppress_queue_autosend = true;
+        self.input_paused = true;
+        self.update_task_running_state();
         self.set_initial_user_message_submit_suppressed(/*suppressed*/ true);
         if let Some(message) = self.initial_user_message.take() {
             self.restore_user_message_to_composer(message);
@@ -57,6 +59,7 @@ impl ChatWidget {
         if let Some(questions) = &mut self.bottom_pane.questions {
             questions.delivery_enabled = false;
         }
+        self.input_paused = true;
         self.turn_lifecycle
             .restore_running(/*running*/ false, Instant::now());
         self.update_task_running_state();
