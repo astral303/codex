@@ -4,6 +4,7 @@
 //! channels, submits thread-scoped operations through the app server, and replays buffered events
 //! when the visible thread changes.
 
+use super::pending_turn::dispatch_starting_request;
 use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
 use crate::app_event::ThreadTitleDestination;
@@ -755,7 +756,11 @@ impl App {
                 Ok(true)
             }
             AppCommand::Compact => {
-                app_server.thread_compact_start(thread_id).await?;
+                dispatch_starting_request(
+                    &mut self.chat_widget,
+                    app_server.thread_compact_start(thread_id),
+                )
+                .await?;
                 Ok(true)
             }
             AppCommand::SetThreadName { name } => {
@@ -766,7 +771,11 @@ impl App {
                 Ok(true)
             }
             AppCommand::Review { target } => {
-                let response = app_server.review_start(thread_id, target.clone()).await?;
+                let response = dispatch_starting_request(
+                    &mut self.chat_widget,
+                    app_server.review_start(thread_id, target.clone()),
+                )
+                .await?;
                 let review_thread_id = ThreadId::from_string(&response.review_thread_id)
                     .wrap_err("review/start returned invalid review thread id")?;
                 let store = Arc::clone(&self.ensure_thread_channel(review_thread_id).store);
@@ -839,9 +848,11 @@ impl App {
                 Ok(true)
             }
             AppCommand::RunUserShellCommand { command } => {
-                app_server
-                    .thread_shell_command(thread_id, command.to_string())
-                    .await?;
+                dispatch_starting_request(
+                    &mut self.chat_widget,
+                    app_server.thread_shell_command(thread_id, command.to_string()),
+                )
+                .await?;
                 Ok(true)
             }
             AppCommand::ReloadUserConfig => {
