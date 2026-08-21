@@ -116,9 +116,7 @@ pub(super) async fn continue_with_rewrite(
         Err(_) => {
             let text = history_cell::sanitize_user_text((&prompt).into());
             let message = format!("Couldn’t start a new chat for this rewrite. {text}");
-            if !app.chat_widget.handle_turn_start_rejection(message.clone()) {
-                app.chat_widget.add_error_message(message);
-            }
+            app.chat_widget.handle_turn_start_rejection(message);
         }
     }
     if attached_fork.is_some_and(|fork_id| app.active_thread_id == Some(fork_id)) {

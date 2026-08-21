@@ -2,6 +2,7 @@
 //!
 //! This is the single app-server submission path for both new user turns and steering.
 
+use super::pending_turn::dispatch_starting_request;
 use super::*;
 
 pub(super) async fn try_submit_user_turn(
@@ -106,9 +107,7 @@ pub(super) async fn try_submit_user_turn(
     ) {
         Ok(program) => program,
         Err(message) => {
-            if !app.chat_widget.handle_turn_start_rejection(message.clone()) {
-                app.chat_widget.add_error_message(message);
-            }
+            app.chat_widget.handle_turn_start_rejection(message);
             return Ok(true);
         }
     };
@@ -156,8 +155,10 @@ pub(super) async fn try_submit_user_turn(
         }),
         explicit_profile.and_then(RuntimePermissionProfileOverride::turn_permission_profile),
     );
-    let response = app_server
-        .turn_start(
+    let workspace_roots = config.permissions.user_visible_workspace_roots().to_vec();
+    let response = dispatch_starting_request(
+        &mut app.chat_widget,
+        app_server.turn_start(
             thread_id,
             turn_trigger,
             client_user_message_id.clone(),
@@ -166,7 +167,7 @@ pub(super) async fn try_submit_user_turn(
             turn_approval_policy,
             turn_approvals_reviewer,
             permissions_override,
-            config.permissions.user_visible_workspace_roots(),
+            &workspace_roots,
             model.to_string(),
             effort.clone(),
             *summary,
@@ -174,8 +175,9 @@ pub(super) async fn try_submit_user_turn(
             collaboration_mode.clone(),
             final_output_json_schema.clone(),
             cyber_access_program.map(Into::into),
-        )
-        .await?;
+        ),
+    )
+    .await?;
     if app.active_thread_id == Some(thread_id) && app.chat_widget.thread_id() == Some(thread_id) {
         crate::startup_recovery::acknowledged(client_user_message_id);
         app.chat_widget
