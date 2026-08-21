@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Instant;
 
 use codex_config::types::KeybindingSpec;
 use codex_config::types::KeybindingsSpec;
@@ -15,6 +16,7 @@ use crate::app_event::AppEvent;
 use crate::bottom_pane::AppEventSender;
 const UNDO_KEY: KeyCode = KeyCode::F(2);
 const REDO_KEY: KeyCode = KeyCode::F(3);
+const MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT: &str = "界\u{3000}界";
 
 fn new_composer() -> (ChatComposer, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = unbounded_channel();
@@ -229,4 +231,31 @@ fn external_edit_is_reversible_but_submission_starts_a_new_history() {
     let (result, _) = composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(result, InputResult::Submitted { .. }));
     assert!(!press(&mut composer, UNDO_KEY));
+}
+
+#[test]
+fn detected_paste_burst_is_one_undo_step() {
+    let (mut composer, _rx) = new_composer();
+    composer.set_disable_paste_burst(false);
+    composer.set_text_content("existing prompt".to_string(), Vec::new(), Vec::new());
+    composer.move_cursor_to_end();
+    let before_paste = composer.snapshot_draft();
+    let now = Instant::now();
+
+    // Non-ASCII whitespace lets the existing detector recognize the minimum-length burst.
+    for ch in MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT.chars() {
+        composer.handle_input_basic_with_time_and_undo_history(
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+            now,
+        );
+    }
+    assert!(composer.is_in_paste_burst());
+    assert!(composer.handle_paste_burst_flush(now + PasteBurst::recommended_active_flush_delay()));
+    let after_paste = composer.snapshot_draft();
+
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.snapshot_draft(), before_paste);
+    assert!(!press(&mut composer, UNDO_KEY));
+    assert!(press(&mut composer, REDO_KEY));
+    assert_eq!(composer.snapshot_draft(), after_paste);
 }
