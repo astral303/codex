@@ -306,8 +306,10 @@ async fn pending_mcp_startup_does_not_unblock_foreground_shell() {
 
 #[tokio::test]
 async fn pending_mcp_startup_does_not_unblock_foreground_compaction() {
-    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.dispatch_command(crate::slash_command::SlashCommand::Compact);
+    assert_matches!(rx.try_recv(), Ok(AppEvent::CodexOp(Op::Compact)));
+    chat.reserve_user_turn_pending_start();
     chat.set_mcp_startup_expected_servers(["slow".to_string()]);
     notify_mcp_status(&mut chat, "slow", McpServerStartupState::Starting);
     chat.thread_id = Some(ThreadId::new());
