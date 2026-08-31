@@ -1047,6 +1047,38 @@ async fn resumed_paginated_rollout_repairs_unsafe_tail() -> std::io::Result<()> 
 }
 
 #[tokio::test]
+async fn resumed_paginated_rollout_advances_past_float_payload() -> std::io::Result<()> {
+    let home = TempDir::new().expect("temp dir");
+    let config = test_config(home.path());
+    let rollout_path = home.path().join("rollout.jsonl");
+    write_paginated_rollout(&rollout_path, ThreadId::new(), &[])?;
+    let float_payload = r#"{"timestamp":"2026-07-09T00:00:01Z","ordinal":1,"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":null,"limit_name":null,"primary":{"used_percent":23.0,"window_minutes":60,"resets_at":1800000000},"secondary":null,"credits":null,"individual_limit":null,"spend_control_reached":null,"plan_type":null,"rate_limit_reached_type":null}}}"#;
+    assert!(serde_json::from_str::<RolloutLine>(float_payload).is_err());
+    let mut file = fs::OpenOptions::new().append(true).open(&rollout_path)?;
+    writeln!(file, "{float_payload}")?;
+    drop(file);
+
+    let recorder =
+        RolloutRecorder::new(&config, RolloutRecorderParams::resume(rollout_path.clone())).await?;
+    recorder
+        .record_canonical_items(&[agent_message_item("after-float")])
+        .await?;
+    recorder.flush().await?;
+
+    let ordinals = fs::read_to_string(&rollout_path)?
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .expect("valid rollout JSON")
+                .get("ordinal")
+                .and_then(serde_json::Value::as_u64)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ordinals, vec![Some(0), Some(1), Some(2)]);
+    recorder.shutdown().await
+}
+
+#[tokio::test]
 async fn paginated_ordinal_overflow_fails_without_appending() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());

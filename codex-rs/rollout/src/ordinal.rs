@@ -8,9 +8,11 @@ use std::path::Path;
 
 use codex_protocol::protocol::HistoryPosition;
 use codex_protocol::protocol::ThreadHistoryMode;
+use serde_json::Value;
 
 use crate::RolloutItem;
 use crate::RolloutLine;
+use crate::decode_rollout_line;
 use crate::reverse_jsonl_scanner::ReverseJsonlScanner;
 use crate::reverse_jsonl_scanner::ScanOutcome;
 
@@ -66,9 +68,25 @@ pub(crate) fn ordinal_state_for_rollout(
     }
 
     let mut scanner = ReverseJsonlScanner::new(file)?;
-    let record = loop {
-        match scanner.scan_next::<RolloutLine>()? {
-            Some(ScanOutcome::Parsed(record)) => break record,
+    let ordinal = loop {
+        match scanner.scan_next::<Value>()? {
+            Some(ScanOutcome::Parsed(value)) => {
+                let persisted_ordinal = value.get("ordinal").and_then(Value::as_u64);
+                match decode_rollout_line(value) {
+                    Ok(record) => {
+                        break record.ordinal.ok_or_else(|| {
+                            io::Error::other(format!(
+                                "final paginated rollout record at {} is missing an ordinal",
+                                path.display()
+                            ))
+                        })?;
+                    }
+                    Err(_) => match persisted_ordinal {
+                        Some(ordinal) => break ordinal,
+                        None => continue,
+                    },
+                }
+            }
             Some(ScanOutcome::Rejected(_)) => continue,
             None => {
                 return Err(io::Error::other(format!(
@@ -78,12 +96,6 @@ pub(crate) fn ordinal_state_for_rollout(
             }
         }
     };
-    let ordinal = record.ordinal.ok_or_else(|| {
-        io::Error::other(format!(
-            "final paginated rollout record at {} is missing an ordinal",
-            path.display()
-        ))
-    })?;
     // Child records must start at `subagent_history_start_ordinal`. If initialization died while
     // copying the inherited parent records, resuming would append child records before that
     // boundary.
