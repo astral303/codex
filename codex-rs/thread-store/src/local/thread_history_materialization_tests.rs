@@ -2020,6 +2020,58 @@ async fn catch_up_preserves_trailing_partial_line_boundaries() {
 }
 
 #[tokio::test]
+async fn catch_up_skips_duplicate_noop_ordinal() {
+    let home = TempDir::new().expect("temp dir");
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .expect("persist session metadata");
+
+    let pool = codex_state::open_thread_history_db(&codex_state::SqliteConfig::new_for_testing(
+        home.path().abs(),
+    ))
+    .await
+    .expect("open thread history db");
+    let token_count = RolloutItem::EventMsg(EventMsg::TokenCount(TokenCountEvent {
+        info: None,
+        rate_limits: None,
+    }));
+    let suffix = format!(
+        "{}\n{}\n{}\n",
+        rollout_line(Some(1), token_count.clone()),
+        rollout_line(Some(1), token_count),
+        rollout_line(Some(2), turn_started("turn-1")),
+    );
+    let rollout_path = store
+        .live_rollout_path(thread_id)
+        .await
+        .expect("rollout path");
+    append_suffix(rollout_path.as_path(), suffix.as_str());
+
+    super::materialize_to_sqlite(&store, thread_id, rollout_path.as_path())
+        .await
+        .expect("catch up duplicate no-op ordinal");
+
+    let rollout_len = i64::try_from(fs::metadata(rollout_path).expect("rollout metadata").len())
+        .expect("rollout length");
+    assert_eq!(projection_state(&pool, thread_id).await, (rollout_len, 3));
+    let turns = sqlx::query_as::<_, (String, String)>(
+        "SELECT turn_id, status FROM thread_turns WHERE thread_id = ?",
+    )
+    .bind(thread_id.to_string())
+    .fetch_all(&pool)
+    .await
+    .expect("read projected turns");
+    assert_eq!(
+        turns,
+        vec![("turn-1".to_string(), "inProgress".to_string())]
+    );
+}
+
+#[tokio::test]
 async fn catch_up_rejects_invalid_complete_suffixes_without_advancing_state() {
     let cases = [
         (

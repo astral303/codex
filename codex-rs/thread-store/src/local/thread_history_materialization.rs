@@ -191,6 +191,33 @@ async fn read_projection_steps(
             }
         };
         if ordinal < next_ordinal {
+            let duplicate_has_no_projected_effect = line.as_ref().is_some_and(|line| {
+                let is_inherited_subagent_history =
+                    subagent_history_start_ordinal.is_some_and(|start| ordinal < start);
+                let changes = if is_inherited_subagent_history {
+                    ThreadHistoryChangeSet::default()
+                } else {
+                    project_rollout_line(line)
+                };
+                changes.is_empty() && !matches!(&line.item, RolloutItem::RealtimeItem(_))
+            });
+            if pending_rejected_line_count == 0
+                && ordinal.checked_add(1) == Some(next_ordinal)
+                && duplicate_has_no_projected_effect
+            {
+                warn!(
+                    thread_id = %thread_id,
+                    rollout_path = %rollout_path.display(),
+                    line_start_byte_offset = line_start_offset,
+                    line_end_byte_offset = line_end_offset,
+                    expected_ordinal = next_ordinal,
+                    line_ordinal = ordinal,
+                    "skipping duplicate rollout line with no thread-history changes"
+                );
+                next_offset = line_end_offset;
+                line_start_offset = line_end_offset;
+                continue;
+            }
             return Err(ThreadStoreError::Internal {
                 message: format!(
                     "thread history projection for {thread_id} expected ordinal {next_ordinal}, got {ordinal}"
