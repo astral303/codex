@@ -71,13 +71,15 @@ impl ChatWidget {
             .unwrap_or_else(|error| Err(format!("Failed to prepare images: {error}")))
         {
             Ok(images) => {
-                let (accepted, _) = self.submit_user_message_with_prepared_images(
-                    pending.message,
-                    pending.history_record,
-                    ShellEscapePolicy::Disallow,
-                    pending.source,
-                    Some(images),
-                );
+                let accepted = self
+                    .submit_user_message_with_prepared_images(
+                        pending.message,
+                        pending.history_record,
+                        ShellEscapePolicy::Disallow,
+                        pending.source,
+                        Some(images),
+                    )
+                    .accepted;
                 if !accepted {
                     self.input_queue.recovered_queue |=
                         self.input_queue.has_queued_follow_up_messages();
