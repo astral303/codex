@@ -40,7 +40,10 @@ fn divergent_edit_discards_redo_history() {
 
 #[test]
 fn entry_limit_evicts_oldest_drafts_first() {
-    let mut history = ComposerUndoHistory::with_limits(2, usize::MAX);
+    let mut history = ComposerUndoHistory::with_limits(
+        /*max_entries*/ 2,
+        /*max_retained_bytes*/ usize::MAX,
+    );
     history.record(draft(""));
     history.record(draft("a"));
     history.record(draft("ab"));
@@ -54,7 +57,7 @@ fn entry_limit_evicts_oldest_drafts_first() {
 fn byte_limit_keeps_the_newest_draft_that_fits() {
     let newest = draft("newest");
     let limit = newest.estimated_retained_bytes();
-    let mut history = ComposerUndoHistory::with_limits(10, limit);
+    let mut history = ComposerUndoHistory::with_limits(/*max_entries*/ 10, limit);
     history.record(draft("old"));
 
     assert!(history.record(newest.clone()));
@@ -66,7 +69,8 @@ fn byte_limit_keeps_the_newest_draft_that_fits() {
 #[test]
 fn oversized_draft_clears_older_history() {
     let small = draft("small");
-    let mut history = ComposerUndoHistory::with_limits(10, small.estimated_retained_bytes());
+    let mut history =
+        ComposerUndoHistory::with_limits(/*max_entries*/ 10, small.estimated_retained_bytes());
     history.record(small);
 
     assert!(!history.record(draft("a draft that cannot fit")));
@@ -90,7 +94,7 @@ fn discarding_provisional_edits_preserves_earlier_history() {
     history.record(draft("stable"));
     history.record(draft("stable界"));
 
-    assert!(history.try_discard_provisional_edits(2, &draft("stable")));
+    assert!(history.try_discard_provisional_edits(/*provisional_edit_count*/ 2, &draft("stable")));
     history.record(draft("stable"));
 
     assert_eq!(history.undo(draft("stable界界")), Some(draft("stable")));
@@ -105,8 +109,11 @@ fn invalid_provisional_edit_boundary_preserves_history() {
     history.record(draft("stable界"));
     let mutation_epoch = history.mutation_epoch();
 
-    assert!(!history.try_discard_provisional_edits(4, &draft("stable")));
-    assert!(!history.try_discard_provisional_edits(2, &draft("wrong baseline")));
+    assert!(!history.try_discard_provisional_edits(/*provisional_edit_count*/ 4, &draft("stable")));
+    assert!(!history.try_discard_provisional_edits(
+        /*provisional_edit_count*/ 2,
+        &draft("wrong baseline")
+    ));
     assert_eq!(history.mutation_epoch(), mutation_epoch);
     assert_eq!(history.undo(draft("stable界界")), Some(draft("stable界")));
     assert_eq!(history.undo(draft("stable界")), Some(draft("stable")));
