@@ -20,6 +20,8 @@ expression: text
   ⌃v       Paste image          ⌃c   Quit                ⌃home / ⌃end  Top / latest
   ⌃g       External editor                               ⇧⌥, / ⇧⌥.     Top / latest
   ⌃r       Search history
+  ⌃z       Undo
+  ⌃⇧z      Redo
   esc esc  Edit last message
 
   /keymap customize
