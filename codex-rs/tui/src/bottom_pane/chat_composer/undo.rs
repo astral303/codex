@@ -128,6 +128,11 @@ impl ComposerUndoHistory {
         self.mutation_epoch
     }
 
+    #[cfg(test)]
+    pub(super) fn redo_depth(&self) -> usize {
+        self.redo.len()
+    }
+
     /// Record the state immediately before one content-changing user action.
     pub(super) fn record(&mut self, before_edit: EditableDraft) -> bool {
         self.clear_redo();
