@@ -217,9 +217,16 @@ impl ChatComposer {
         pasted: String,
         shell_prefix: ShellPrefixHandling,
     ) -> bool {
+        if self.draft.textarea.vim_query().is_some() {
+            return self.apply_paste_with_shell_prefix_without_history(pasted, shell_prefix);
+        }
+        let started_vim_edit = self.begin_direct_vim_edit();
         let before_edit = self.snapshot_draft();
         let needs_redraw = self.apply_paste_with_shell_prefix_without_history(pasted, shell_prefix);
         self.record_edit_since(before_edit);
+        if started_vim_edit {
+            self.finish_vim_edit();
+        }
         needs_redraw
     }
 

@@ -49,7 +49,7 @@ impl ChatComposer {
             .preview_draft
             .get_or_insert_with(|| search.original_draft.clone());
         let preview = self.snapshot_draft();
-        let preview_vim_history = std::mem::take(&mut self.vim_history);
+        let preview_vim_edit_transaction = std::mem::take(&mut self.vim_edit_transaction);
         let mut preview_vim_state = VimPersistentState::default();
         self.draft
             .textarea
@@ -58,10 +58,10 @@ impl ChatComposer {
         self.draft
             .textarea
             .swap_vim_persistent_state(&mut search.original_vim_state);
-        self.vim_history = search.original_vim_history;
+        self.vim_edit_transaction = search.original_vim_edit_transaction;
         edit(self);
         search.original_draft = self.snapshot_draft();
-        search.original_vim_history = std::mem::take(&mut self.vim_history);
+        search.original_vim_edit_transaction = std::mem::take(&mut self.vim_edit_transaction);
         self.draft
             .textarea
             .swap_vim_persistent_state(&mut search.original_vim_state);
@@ -70,6 +70,6 @@ impl ChatComposer {
         self.draft
             .textarea
             .swap_vim_persistent_state(&mut preview_vim_state);
-        self.vim_history = preview_vim_history;
+        self.vim_edit_transaction = preview_vim_edit_transaction;
     }
 }
