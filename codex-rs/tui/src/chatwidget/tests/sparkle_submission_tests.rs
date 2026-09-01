@@ -47,7 +47,7 @@ async fn ordinary_and_prepared_image_submissions_consume_the_sparkle_before_rend
             text_elements: Vec::new(),
         });
         let message = UserMessage::from(text);
-        let (accepted, _command) = match prepared_images {
+        let accepted = match prepared_images {
             Some(images) => chat.submit_user_message_with_prepared_images(
                 message,
                 UserMessageHistoryRecord::UserMessageText,
@@ -61,7 +61,8 @@ async fn ordinary_and_prepared_image_submissions_consume_the_sparkle_before_rend
                 ShellEscapePolicy::Disallow,
                 UserMessageSource::Prompt,
             ),
-        };
+        }
+        .accepted;
 
         assert!(accepted);
         assert_ne!(
