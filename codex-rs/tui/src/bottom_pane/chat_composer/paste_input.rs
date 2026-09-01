@@ -148,7 +148,6 @@ impl ChatComposer {
             query.editor.insert_str(&pasted);
             return true;
         }
-        let started_vim_edit = self.begin_direct_vim_edit();
         let elements_before = self.draft.textarea.element_payloads();
         let char_count = pasted.chars().count();
         if char_count > LARGE_PASTE_CHAR_THRESHOLD {
@@ -169,9 +168,6 @@ impl ChatComposer {
         self.draft.paste_burst.clear_after_explicit_paste();
         self.reconcile_deleted_elements(elements_before);
         self.sync_popups();
-        if started_vim_edit {
-            self.finish_vim_edit();
-        }
         true
     }
 

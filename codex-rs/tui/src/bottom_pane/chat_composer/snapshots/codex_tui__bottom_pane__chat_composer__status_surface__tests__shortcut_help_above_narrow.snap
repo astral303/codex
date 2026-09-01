@@ -13,14 +13,16 @@ expression: text
   Keyboard shortcuts
 
   Compose
-  /        Commands
-  @        Mention files
-  !        Shell command
-  ctrl+j   New line
-  ctrl+v   Paste image
-  ctrl+g   External editor
-  ctrl+r   Search history
-  esc esc  Edit last message
+  /             Commands
+  @             Mention files
+  !             Shell command
+  ctrl+j        New line
+  ctrl+v        Paste image
+  ctrl+g        External editor
+  ctrl+r        Search history
+  ctrl+z        Undo
+  ctrl+shift+z  Redo
+  esc esc       Edit last message
 
   Session
   tab     Send message

@@ -15,7 +15,15 @@ fn composer() -> ChatComposer {
     );
     composer.set_status_line_enabled(/*enabled*/ true);
     composer.set_status_line(Some(Line::from("MODEL · ~/project · Context 20% used")));
+    pin_undo_hints(&mut composer);
     composer
+}
+
+/// Undo and redo defaults differ by platform; shortcut-help snapshots pin one pair.
+fn pin_undo_hints(composer: &mut ChatComposer) {
+    let hints = crate::bottom_pane::footer::FooterKeyHints::default_bindings();
+    composer.footer.undo_key = hints.undo;
+    composer.footer.redo_key = hints.redo;
 }
 
 fn render(
@@ -437,6 +445,7 @@ fn activity_shortcut_help_follows_runtime_binding() {
         let keymap = crate::keymap::RuntimeKeymap::from_config(&config).unwrap();
         let mut composer = composer();
         composer.set_keymap_bindings(&keymap);
+        pin_undo_hints(&mut composer);
         composer.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
         let (text, _) = render(&composer, /*width*/ 130, /*footer*/ None);
         snapshots.push(format!("{configured}\n{text}"));
