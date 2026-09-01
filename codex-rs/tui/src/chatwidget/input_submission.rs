@@ -4,6 +4,40 @@ use super::*;
 use codex_app_server_protocol::ImageReference;
 use codex_utils_path_uri::LegacyAppPathString;
 
+pub(super) struct UserMessageSubmissionOutcome {
+    pub(super) accepted: bool,
+    app_command: Option<AppCommand>,
+    pub(super) queue_drain: QueueDrain,
+}
+
+impl UserMessageSubmissionOutcome {
+    const QUEUED: Self = Self {
+        accepted: true,
+        app_command: None,
+        queue_drain: QueueDrain::Stop,
+    };
+
+    const CONTINUE_QUEUE: Self = Self {
+        accepted: false,
+        app_command: None,
+        queue_drain: QueueDrain::Continue,
+    };
+
+    const REJECTED: Self = Self {
+        accepted: false,
+        app_command: None,
+        queue_drain: QueueDrain::Stop,
+    };
+
+    fn submitted(app_command: AppCommand) -> Self {
+        Self {
+            accepted: true,
+            app_command: Some(app_command),
+            queue_drain: QueueDrain::Stop,
+        }
+    }
+}
+
 impl ChatWidget {
     pub(crate) fn set_task_mentions_enabled(&mut self, enabled: bool) {
         self.bottom_pane.set_task_mentions_enabled(enabled);
@@ -69,32 +103,18 @@ impl ChatWidget {
                 let history_text = user_message.text.clone();
                 self.submit_shell_command_with_history(command, &history_text)
             }
-            None => {
-                self.submit_user_message(user_message);
-                QueueDrain::Stop
-            }
+            None => self.submit_user_message(user_message),
         }
     }
 
-    pub(super) fn submit_user_message(&mut self, user_message: UserMessage) {
-        let _accepted = self.submit_user_message_with_history_record(
-            user_message,
-            UserMessageHistoryRecord::UserMessageText,
-        );
-    }
-
-    pub(super) fn submit_user_message_with_history_record(
-        &mut self,
-        user_message: UserMessage,
-        history_record: UserMessageHistoryRecord,
-    ) -> bool {
+    pub(super) fn submit_user_message(&mut self, user_message: UserMessage) -> QueueDrain {
         self.submit_user_message_with_history_and_shell_escape_policy(
             user_message,
-            history_record,
+            UserMessageHistoryRecord::UserMessageText,
             ShellEscapePolicy::Allow,
             UserMessageSource::Prompt,
         )
-        .0
+        .queue_drain
     }
 
     pub(super) fn submit_user_message_with_shell_escape_policy(
@@ -108,7 +128,7 @@ impl ChatWidget {
             shell_escape_policy,
             UserMessageSource::Prompt,
         )
-        .1
+        .app_command
     }
 
     pub(crate) fn prepare_safety_recourse_rewrite(&mut self, prompt: &str) -> Option<AppCommand> {
@@ -127,7 +147,7 @@ impl ChatWidget {
                 ShellEscapePolicy::Disallow,
                 UserMessageSource::SafetyRecourse,
             )
-            .1?;
+            .app_command?;
         self.safety_buffering_source = UserMessageSource::Prompt;
         Some(op)
     }
@@ -138,7 +158,7 @@ impl ChatWidget {
         history_record: UserMessageHistoryRecord,
         shell_escape_policy: ShellEscapePolicy,
         source: UserMessageSource,
-    ) -> (bool, Option<AppCommand>) {
+    ) -> UserMessageSubmissionOutcome {
         self.submit_user_message_with_prepared_images(
             user_message,
             history_record,
@@ -155,10 +175,10 @@ impl ChatWidget {
         shell_escape_policy: ShellEscapePolicy,
         source: UserMessageSource,
         prepared_images: Option<Vec<UserInput>>,
-    ) -> (bool, Option<AppCommand>) {
+    ) -> UserMessageSubmissionOutcome {
         self.bottom_pane.dismiss_composer_sparkle();
         if self.has_misalignment_policy_violation() {
-            return (false, None);
+            return UserMessageSubmissionOutcome::REJECTED;
         }
         self.empty_state_animation.borrow_mut().dismiss();
         if self.input_queue.rate_limit_recovery_pending
@@ -195,7 +215,7 @@ impl ChatWidget {
             if model_prompt {
                 self.bottom_pane.clear_pending_questions();
             }
-            return (true, None);
+            return UserMessageSubmissionOutcome::QUEUED;
         }
         if !self.is_session_configured() {
             let model_prompt = source == UserMessageSource::Prompt
@@ -215,13 +235,13 @@ impl ChatWidget {
             if model_prompt {
                 self.bottom_pane.clear_pending_questions();
             }
-            return (true, None);
+            return UserMessageSubmissionOutcome::QUEUED;
         }
         if user_message.text.is_empty()
             && user_message.local_images.is_empty()
             && user_message.remote_image_urls.is_empty()
         {
-            return (false, None);
+            return UserMessageSubmissionOutcome::REJECTED;
         }
         if (!user_message.local_images.is_empty() || !user_message.remote_image_urls.is_empty())
             && !self.current_model_supports_images()
@@ -240,7 +260,7 @@ impl ChatWidget {
                 mention_bindings,
                 remote_image_urls,
             );
-            return (false, None);
+            return UserMessageSubmissionOutcome::REJECTED;
         }
         let UserMessage {
             text,
@@ -257,13 +277,12 @@ impl ChatWidget {
         if shell_escape_policy == ShellEscapePolicy::Allow
             && let Some(stripped) = text.strip_prefix('!')
         {
-            let app_command = match self.submit_shell_command_with_history(stripped, &text) {
-                QueueDrain::Continue => None,
-                QueueDrain::Stop => Some(AppCommand::run_user_shell_command(
-                    stripped.trim().to_string(),
-                )),
+            return match self.submit_shell_command_with_history(stripped, &text) {
+                QueueDrain::Continue => UserMessageSubmissionOutcome::CONTINUE_QUEUE,
+                QueueDrain::Stop => UserMessageSubmissionOutcome::submitted(
+                    AppCommand::run_user_shell_command(stripped.trim().to_string()),
+                ),
             };
-            return (app_command.is_some(), app_command);
         }
 
         for image_url in &remote_image_urls {
@@ -289,7 +308,7 @@ impl ChatWidget {
                 history_record,
                 source,
             );
-            return (true, None);
+            return UserMessageSubmissionOutcome::QUEUED;
         } else {
             items.extend(local_images.iter().map(|image| UserInput::LocalImage {
                 path: image.path.clone(),
@@ -443,7 +462,7 @@ impl ChatWidget {
                 },
                 &history_record,
             ));
-            return (false, None);
+            return UserMessageSubmissionOutcome::REJECTED;
         }
 
         self.maybe_apply_ide_context(&mut items);
@@ -520,7 +539,7 @@ impl ChatWidget {
 
         // The app submits recourse turns directly to the verified fork.
         if source != UserMessageSource::SafetyRecourse && !self.submit_op(op.clone()) {
-            return (false, None);
+            return UserMessageSubmissionOutcome::REJECTED;
         }
         if source != UserMessageSource::QuestionAnswer {
             self.bottom_pane.clear_pending_questions();
@@ -594,7 +613,7 @@ impl ChatWidget {
             self.last_rendered_user_message_display = Some(display);
         }
 
-        (true, Some(op))
+        UserMessageSubmissionOutcome::submitted(op)
     }
 
     /// Restore the blocked submission draft without losing mention resolution state.

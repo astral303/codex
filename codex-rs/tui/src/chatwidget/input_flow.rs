@@ -237,7 +237,7 @@ impl ChatWidget {
                 ShellEscapePolicy::Allow,
                 source,
             )
-            .0
+            .accepted
         }
     }
 
@@ -274,7 +274,7 @@ impl ChatWidget {
                             ShellEscapePolicy::Allow,
                             source,
                         )
-                        .0;
+                        .accepted;
                     break;
                 }
                 QueuedInputAction::Literal => {
@@ -316,7 +316,7 @@ impl ChatWidget {
                             source,
                             prepared_images,
                         )
-                        .0;
+                        .accepted;
                     if !submitted_follow_up {
                         restored_pending_pastes.extend(pending_pastes);
                         self.bottom_pane

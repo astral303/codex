@@ -149,22 +149,26 @@ impl ChatWidget {
     }
 
     pub(crate) fn submit_initial_user_message_if_pending(&mut self) {
+        let _queue_drain = self.submit_initial_user_message_for_queue_drain();
+    }
+
+    pub(super) fn submit_initial_user_message_for_queue_drain(&mut self) -> QueueDrain {
         if self.suppress_initial_user_message_submit || self.input_queue.rate_limit_recovery_pending
         {
-            return;
+            return QueueDrain::Stop;
         }
         #[cfg(any(target_os = "windows", test))]
         if self.windows_sandbox_local_server
             && self.windows_sandbox_host != crate::app::WindowsSandboxHost::Remote
             && self.windows_sandbox_config.requirements.is_none()
         {
-            return;
+            return QueueDrain::Stop;
         }
         #[cfg(any(target_os = "windows", test))]
         if self.windows_sandbox_host == crate::app::WindowsSandboxHost::Local
             && self.elevated_windows_sandbox_setup_required()
         {
-            return;
+            return QueueDrain::Stop;
         }
         #[cfg(any(target_os = "windows", test))]
         if matches!(
@@ -175,55 +179,61 @@ impl ChatWidget {
             if let Some(user_message) = self.initial_user_message.take() {
                 self.restore_user_message_to_composer(user_message);
             }
-            return;
+            return QueueDrain::Stop;
         }
         if self.blocks_direct_input {
             if let Some(user_message) = self.initial_user_message.take() {
                 self.restore_user_message_to_composer(user_message);
             }
-            return;
+            return QueueDrain::Stop;
         }
-        if let Some(user_message) = self.initial_user_message.take() {
-            // Command-line input bypasses the composer, which normally records local recall.
-            let mut entry = HistoryEntry {
-                text: user_message.text.clone(),
-                text_elements: user_message.text_elements.clone(),
-                local_image_paths: user_message
-                    .local_images
-                    .iter()
-                    .map(|image| image.path.clone())
-                    .collect(),
-                remote_image_urls: user_message.remote_image_urls.clone(),
-                mention_bindings: user_message.mention_bindings.clone(),
-                pending_pastes: Vec::new(),
-            };
-            // CLI images have no composer elements. Give recalled attachments owned placeholders
-            // so the composer retains them when the user submits the recalled prompt again.
-            for index in 0..entry.local_image_paths.len() {
-                let placeholder = local_image_label_text(entry.remote_image_urls.len() + index + 1);
-                if entry
-                    .text_elements
-                    .iter()
-                    .any(|element| element.placeholder(&entry.text) == Some(placeholder.as_str()))
-                {
-                    continue;
+        match self.initial_user_message.take() {
+            Some(user_message) => {
+                // Command-line input bypasses the composer, which normally records local recall.
+                let mut entry = HistoryEntry {
+                    text: user_message.text.clone(),
+                    text_elements: user_message.text_elements.clone(),
+                    local_image_paths: user_message
+                        .local_images
+                        .iter()
+                        .map(|image| image.path.clone())
+                        .collect(),
+                    remote_image_urls: user_message.remote_image_urls.clone(),
+                    mention_bindings: user_message.mention_bindings.clone(),
+                    pending_pastes: Vec::new(),
+                };
+                // CLI images have no composer elements. Give recalled attachments owned placeholders
+                // so the composer retains them when the user submits the recalled prompt again.
+                for index in 0..entry.local_image_paths.len() {
+                    let placeholder =
+                        local_image_label_text(entry.remote_image_urls.len() + index + 1);
+                    if entry.text_elements.iter().any(|element| {
+                        element.placeholder(&entry.text) == Some(placeholder.as_str())
+                    }) {
+                        continue;
+                    }
+                    if !entry.text.is_empty() {
+                        entry.text.push(' ');
+                    }
+                    let start = entry.text.len();
+                    entry.text.push_str(&placeholder);
+                    entry.text_elements.push(TextElement::new(
+                        (start..entry.text.len()).into(),
+                        Some(placeholder),
+                    ));
                 }
-                if !entry.text.is_empty() {
-                    entry.text.push(' ');
+                let outcome = self.submit_user_message_with_history_and_shell_escape_policy(
+                    user_message,
+                    UserMessageHistoryRecord::UserMessageText,
+                    ShellEscapePolicy::Allow,
+                    UserMessageSource::Prompt,
+                );
+                if outcome.accepted {
+                    self.bottom_pane.record_local_user_message_history(entry);
                 }
-                let start = entry.text.len();
-                entry.text.push_str(&placeholder);
-                entry.text_elements.push(TextElement::new(
-                    (start..entry.text.len()).into(),
-                    Some(placeholder),
-                ));
+                outcome.queue_drain
             }
-            if self.submit_user_message_with_history_record(
-                user_message,
-                UserMessageHistoryRecord::UserMessageText,
-            ) {
-                self.bottom_pane.record_local_user_message_history(entry);
-            }
+            None => QueueDrain::Continue,
         }
     }
 
