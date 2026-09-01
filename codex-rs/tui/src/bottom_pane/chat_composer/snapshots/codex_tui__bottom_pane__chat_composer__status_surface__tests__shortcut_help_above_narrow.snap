@@ -20,6 +20,8 @@ expression: text
   ⌃v       Paste image
   ⌃g       External editor
   ⌃r       Search history
+  ⌃z       Undo
+  ⌃⇧z      Redo
   esc esc  Edit last message
 
   Session
