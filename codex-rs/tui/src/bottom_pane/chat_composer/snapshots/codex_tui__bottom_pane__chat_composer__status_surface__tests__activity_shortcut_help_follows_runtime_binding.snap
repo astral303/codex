@@ -21,6 +21,8 @@ expression: "snapshots.join(\"\\n---\\n\")"
   ⌃v       Paste image          f4       Inspect activity            ⌃home / ⌃end  Top / latest
   ⌃g       External editor      ⌃c       Quit                        ⇧⌥, / ⇧⌥.     Top / latest
   ⌃r       Search history
+  ⌃z       Undo
+  ⌃⇧z      Redo
   esc esc  Edit last message
 
   /keymap customize
@@ -49,6 +51,8 @@ expression: "snapshots.join(\"\\n---\\n\")"
   ⌃v       Paste image          ⌃x t     Inspect activity            ⌃home / ⌃end  Top / latest
   ⌃g       External editor      ⌃c       Quit                        ⇧⌥, / ⇧⌥.     Top / latest
   ⌃r       Search history
+  ⌃z       Undo
+  ⌃⇧z      Redo
   esc esc  Edit last message
 
   /keymap customize
@@ -77,6 +81,8 @@ expression: "snapshots.join(\"\\n---\\n\")"
   ⌃v       Paste image          ⌃c       Quit                        ⌃home / ⌃end  Top / latest
   ⌃g       External editor                                           ⇧⌥, / ⇧⌥.     Top / latest
   ⌃r       Search history
+  ⌃z       Undo
+  ⌃⇧z      Redo
   esc esc  Edit last message
 
   /keymap customize

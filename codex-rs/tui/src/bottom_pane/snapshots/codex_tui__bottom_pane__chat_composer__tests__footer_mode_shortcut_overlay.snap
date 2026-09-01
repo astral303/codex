@@ -12,6 +12,8 @@ expression: terminal.backend()
 "  ⌃v      Paste image          f4       Inspect activity            ⌃home / ⌃end  Top / latest      "
 "  ⌃g      External editor      ⌃c       Quit                        ⇧⌥, / ⇧⌥.     Top / latest      "
 "  ⌃r      Search history                                                                            "
+"  ⌃z      Undo                                                                                      "
+"  ⌃⇧z     Redo                                                                                      "
 "  esc     Edit last message                                                                         "
 "                                                                                                    "
 "  /keymap customize                                                                                 "
