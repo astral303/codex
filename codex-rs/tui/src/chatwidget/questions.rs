@@ -168,7 +168,7 @@ impl ChatWidget {
                         ShellEscapePolicy::Disallow,
                         UserMessageSource::QuestionAnswer,
                     )
-                    .0
+                    .accepted
                 };
                 if accepted {
                     if let Some(questions) = &mut self.bottom_pane.questions {
