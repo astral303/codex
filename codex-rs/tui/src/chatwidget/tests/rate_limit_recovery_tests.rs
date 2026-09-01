@@ -42,6 +42,34 @@ async fn rate_limit_recovery_holds_submissions_until_model_change() {
 }
 
 #[tokio::test]
+async fn rate_limit_recovery_drains_queue_after_initial_shell_help() {
+    let (mut chat, mut events, _ops) = make_chatwidget_manual(Some("test-model-a")).await;
+    chat.codex_op_target = CodexOpTarget::AppEvent;
+    chat.thread_id = Some(ThreadId::new());
+    chat.initial_user_message = Some(UserMessage::from("!   "));
+    chat.hold_rate_limit_recovery();
+    chat.queue_user_message(UserMessage::from("queued follow-up"));
+
+    chat.finish_rate_limit_recovery();
+
+    assert!(chat.queued_user_message_texts().is_empty());
+    let submitted_items = std::iter::from_fn(|| events.try_recv().ok()).find_map(|event| {
+        if let AppEvent::CodexOp(AppCommand::UserTurn { items, .. }) = event {
+            Some(items)
+        } else {
+            None
+        }
+    });
+    assert_eq!(
+        submitted_items,
+        Some(vec![UserInput::Text {
+            text: "queued follow-up".to_string(),
+            text_elements: Vec::new(),
+        }])
+    );
+}
+
+#[tokio::test]
 async fn rate_limit_recovery_preserves_settings_hold_and_clears_on_account_change() {
     let (mut chat, _events, mut ops) = make_chatwidget_manual(Some("test-model-a")).await;
     set_chatgpt_auth(&mut chat);

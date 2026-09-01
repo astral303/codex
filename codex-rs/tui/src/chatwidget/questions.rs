@@ -125,7 +125,7 @@ impl ChatWidget {
                         UserMessageHistoryRecord::UserMessageText,
                         ShellEscapePolicy::Disallow,
                     )
-                    .0
+                    .accepted
                 };
                 if accepted {
                     if let Some(questions) = &mut self.bottom_pane.questions {
