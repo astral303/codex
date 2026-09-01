@@ -3242,6 +3242,7 @@ mod tests {
                 ("vim_search", "forward", ""),
                 ("vim_search", "forward", " g"),
                 ("composer", "submit", ""),
+                ("composer", "undo", ""),
                 ("global", "submit", ""),
                 ("global", "queue", ""),
                 ("global", "toggle_shortcuts", ""),

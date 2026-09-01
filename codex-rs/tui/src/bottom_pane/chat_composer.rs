@@ -63,11 +63,11 @@
 //! Up/Down does not create undo steps. When recalled content matches the adjacent undo or redo
 //! state, navigation reuses that state and preserves earlier history; unrelated recalls establish
 //! a new undo baseline.
-//! Vim undo/redo snapshots complete drafts and groups direct edits with active Vim transactions.
-//! An active edit keeps one separately capped snapshot; canceling does not evict committed history.
-//! Canceled history previews restore history and active commands; accepting another prompt resets them.
-//! Normal-mode Ctrl+R redoes an edit, or does nothing when redo is empty. Insert-mode Ctrl+R
-//! keeps prompt-history search; explicitly configured keybindings retain precedence.
+//! Vim commands and insert sessions contribute grouped steps to the same history as ordinary
+//! editor actions. Normal-mode `u` undoes and normal-mode `Ctrl+R` redoes on that shared history;
+//! insert-mode `Ctrl+R` keeps prompt-history search, and explicitly configured keybindings retain
+//! precedence. Canceled history previews restore pending Vim state; accepting another prompt
+//! resets the shared history.
 //! Vim queries stay draft-local.
 //!
 //! Slash commands are staged for local history instead of being recorded immediately. Command
@@ -80,8 +80,9 @@
 //! pending paste payloads, mentions, shell mode, and image attachments together. Content-changing
 //! key events, paste, image attachment, external-editor replacement, and `Ctrl+C` clear each create
 //! one entry; cursor-only movement leaves redo intact. Submission and programmatic draft replacement
-//! establish a new baseline that undo cannot cross. The history is bounded by both entry count and
-//! retained bytes.
+//! establish a new baseline that undo cannot cross. Vim `u`, Vim `Ctrl+R`, and composer undo/redo
+//! traverse that same chronology across editor-mode changes. The history is bounded by both entry
+//! count and retained bytes.
 //!
 //! # Startup Draft Handoff
 //!
@@ -344,7 +345,7 @@ use self::slash_input::SubmissionValidation;
 pub(in crate::bottom_pane) use self::undo::ComposerDraft;
 use self::undo::ComposerDraftContent;
 use self::undo::ComposerUndoHistory;
-use self::vim_history::VimHistory;
+use self::vim_history::VimEditTransaction;
 use crate::app_event::AppEvent;
 use crate::app_event::ConnectorsSnapshot;
 use crate::app_event_sender::AppEventSender;
@@ -577,7 +578,7 @@ pub(crate) struct ChatComposer {
     windows_degraded_sandbox_active: bool,
     side_conversation_active: bool,
     history_search: Option<HistorySearchSession>,
-    vim_history: VimHistory,
+    vim_edit_transaction: VimEditTransaction,
     submit_keys: Vec<KeyBinding>,
     queue_keys: Vec<KeyBinding>,
     toggle_shortcuts_keys: Vec<KeyBinding>,
@@ -735,7 +736,7 @@ impl ChatComposer {
             windows_degraded_sandbox_active: false,
             side_conversation_active: false,
             history_search: None,
-            vim_history: VimHistory::default(),
+            vim_edit_transaction: VimEditTransaction::default(),
             submit_keys: vec![key_hint::plain(KeyCode::Enter)],
             queue_keys: vec![key_hint::plain(KeyCode::Tab)],
             toggle_shortcuts_keys: vec![
@@ -1239,9 +1240,16 @@ impl ChatComposer {
     /// In all cases, clears any paste-burst Enter suppression state so a real paste cannot affect
     /// the next user Enter key, then syncs popup state.
     pub fn handle_paste(&mut self, pasted: String) -> bool {
+        if self.draft.textarea.vim_query().is_some() {
+            return self.apply_paste(pasted);
+        }
+        let started_vim_edit = self.begin_direct_vim_edit();
         let before_edit = self.snapshot_draft();
         let needs_redraw = self.apply_paste(pasted);
         self.record_edit_since(before_edit);
+        if started_vim_edit {
+            self.finish_vim_edit();
+        }
         needs_redraw
     }
 
@@ -1335,9 +1343,13 @@ impl ChatComposer {
     /// are renumbered to `[Image #M+1]..[Image #N]` (where `M` is the number of
     /// remote images). Cursor is placed at the end after rebuilding elements.
     pub(crate) fn apply_external_edit(&mut self, text: String) {
+        let started_vim_edit = self.begin_direct_vim_edit();
         let before_edit = self.snapshot_draft();
         self.apply_external_edit_without_history(text);
         self.record_edit_since(before_edit);
+        if started_vim_edit {
+            self.finish_vim_edit();
+        }
     }
 
     fn apply_external_edit_without_history(&mut self, text: String) {
@@ -1427,9 +1439,12 @@ impl ChatComposer {
         if let Some(pasted) = self.draft.paste_burst.flush_before_modified_input() {
             self.handle_paste(pasted);
         }
+        if !enabled && self.draft.textarea.is_vim_enabled() {
+            self.draft.textarea.finish_vim_insert_session();
+            self.commit_pending_vim_edit();
+        }
         self.draft.textarea.enable_vim_search();
         self.draft.textarea.set_vim_enabled(enabled);
-        self.vim_history = VimHistory::default();
         self.draft.paste_burst.clear_after_explicit_paste();
         self.footer.mode = reset_mode_after_activity(self.footer.mode);
     }
@@ -1638,7 +1653,6 @@ impl ChatComposer {
     ) {
         // Clear any existing content, placeholders, and attachments first.
         self.footer.flash = None;
-        self.vim_history = VimHistory::default();
         self.draft.textarea.set_text_clearing_elements("");
         self.draft.is_bash_mode = false;
         self.draft.pending_pastes.clear();
@@ -1746,6 +1760,9 @@ impl ChatComposer {
     }
 
     fn record_edit_since(&mut self, before_edit: ComposerDraft) {
+        if self.vim_edit_transaction.is_active() {
+            return;
+        }
         let after_edit = self.snapshot_draft();
         if before_edit.has_same_content(&after_edit) {
             return;
@@ -1754,31 +1771,48 @@ impl ChatComposer {
     }
 
     fn establish_undo_baseline(&mut self) {
+        self.vim_edit_transaction = VimEditTransaction::default();
         self.undo_history.clear();
     }
 
     fn undo_edit(&mut self) -> bool {
+        self.finish_pending_vim_edit_for_history_action();
         let current = self.snapshot_draft();
         let Some(draft) = self.undo_history.undo(current) else {
             return false;
         };
-        if self.draft.textarea.is_vim_operator_pending() {
-            self.draft.textarea.enter_vim_normal_mode();
-        }
-        self.restore_draft(draft);
+        self.restore_draft_preserving_vim_state(draft);
+        self.draft.textarea.enter_vim_normal_mode();
         true
     }
 
     fn redo_edit(&mut self) -> bool {
+        self.finish_pending_vim_edit_for_history_action();
         let current = self.snapshot_draft();
         let Some(draft) = self.undo_history.redo(current) else {
             return false;
         };
-        if self.draft.textarea.is_vim_operator_pending() {
-            self.draft.textarea.enter_vim_normal_mode();
-        }
-        self.restore_draft(draft);
+        self.restore_draft_preserving_vim_state(draft);
+        self.draft.textarea.enter_vim_normal_mode();
         true
+    }
+
+    fn finish_pending_vim_edit_for_history_action(&mut self) {
+        if self.vim_edit_transaction.is_active() {
+            self.draft.textarea.finish_vim_insert_session();
+            self.commit_pending_vim_edit();
+        }
+    }
+
+    fn restore_draft_preserving_vim_state(&mut self, draft: ComposerDraft) {
+        let mut vim_state = crate::bottom_pane::textarea::VimPersistentState::default();
+        self.draft
+            .textarea
+            .swap_vim_persistent_state(&mut vim_state);
+        self.restore_draft(draft);
+        self.draft
+            .textarea
+            .swap_vim_persistent_state(&mut vim_state);
     }
 
     /// Update the placeholder text without changing input enablement.
@@ -1843,6 +1877,7 @@ impl ChatComposer {
         if self.is_empty() {
             return None;
         }
+        self.finish_pending_vim_edit_for_history_action();
         let before_edit = self.snapshot_draft();
         let previous = self.current_text();
         let text_elements = self.current_text_elements();
@@ -1924,7 +1959,9 @@ impl ChatComposer {
             HistorySearchDirection::Newer => self.undo_history.redo(current),
         };
         match adjacent_draft {
-            Some(draft) if draft.has_same_content(&recalled) => self.restore_draft(draft),
+            Some(draft) if draft.has_same_content(&recalled) => {
+                self.restore_draft_preserving_vim_state(draft);
+            }
             Some(_) | None => self.establish_undo_baseline(),
         }
     }
@@ -3973,7 +4010,10 @@ impl ChatComposer {
         if let Some(elements_before) = elements_before {
             self.reconcile_deleted_elements(elements_before);
         }
+        let history_epoch_before_vim_finish = self.undo_history.mutation_epoch();
         self.finish_vim_edit();
+        let vim_finish_recorded_edit =
+            self.undo_history.mutation_epoch() != history_epoch_before_vim_finish;
 
         // Update the paste-burst heuristic for text, shortcut, and non-char events.
         match input.code {
@@ -3991,7 +4031,9 @@ impl ChatComposer {
             }
         }
 
-        self.record_edit_since(before_edit);
+        if !vim_finish_recorded_edit {
+            self.record_edit_since(before_edit);
+        }
         (InputResult::None, true)
     }
 
