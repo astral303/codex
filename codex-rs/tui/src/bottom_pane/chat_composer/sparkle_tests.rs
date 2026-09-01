@@ -19,7 +19,7 @@ use super::field::DOTS;
 
 fn pane() -> BottomPane {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    BottomPane::new(BottomPaneParams {
+    let mut pane = BottomPane::new(BottomPaneParams {
         app_event_tx: AppEventSender::new(tx),
         frame_requester: FrameRequester::test_dummy(),
         has_input_focus: true,
@@ -29,7 +29,12 @@ fn pane() -> BottomPane {
         animations_enabled: true,
         effects: Default::default(),
         skills: None,
-    })
+    });
+    // Undo and redo defaults differ by platform; shortcut-help snapshots pin one pair.
+    let hints = crate::bottom_pane::footer::FooterKeyHints::default_bindings();
+    pane.composer.footer.undo_key = hints.undo;
+    pane.composer.footer.redo_key = hints.redo;
+    pane
 }
 
 fn palette<T>(render: impl FnOnce() -> T) -> T {
