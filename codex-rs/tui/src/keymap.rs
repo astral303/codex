@@ -622,17 +622,15 @@ impl RuntimeKeymap {
                     || configured_context_alias_is_used(&keymap.approval, alias)
             });
         let undo_default_is_shadowed = keymap.composer.undo.is_none()
-            && defaults
-                .composer
-                .undo
-                .iter()
-                .any(|binding| configured_main_surface_binding_is_used(keymap, *binding));
+            && defaults.composer.undo.iter().any(|binding| {
+                configured_main_surface_binding_is_used(keymap, *binding)
+                    || configured_chord_prefix_is_used(&chords, KeymapContext::Composer, *binding)
+            });
         let redo_default_is_shadowed = keymap.composer.redo.is_none()
-            && defaults
-                .composer
-                .redo
-                .iter()
-                .any(|binding| configured_main_surface_binding_is_used(keymap, *binding));
+            && defaults.composer.redo.iter().any(|binding| {
+                configured_main_surface_binding_is_used(keymap, *binding)
+                    || configured_chord_prefix_is_used(&chords, KeymapContext::Composer, *binding)
+            });
         let app = AppKeymap {
             open_agents: resolve_bindings(
                 keymap.global.open_agents.as_ref(),
@@ -2293,6 +2291,17 @@ fn configured_main_surface_binding_is_used(keymap: &TuiKeymap, binding: KeyBindi
     configured_main_surface_contains(keymap, |value| parse_keybinding(value) == Some(binding))
 }
 
+fn configured_chord_prefix_is_used(
+    chords: &RuntimeChordKeymap,
+    context: KeymapContext,
+    binding: KeyBinding,
+) -> bool {
+    chords.bindings.iter().any(|configured| {
+        configured.action.context.overlaps(context)
+            && configured.chord.prefix.parts() == binding.parts()
+    })
+}
+
 fn configured_main_surface_alias_is_used(keymap: &TuiKeymap, alias: &str) -> bool {
     configured_main_surface_contains(keymap, |value| value == alias)
 }
@@ -2464,7 +2473,7 @@ mod tests {
         KeybindingsSpec::One(KeybindingSpec(spec.to_string()))
     }
 
-    fn one_composer_z_binding(binding: KeyBinding) -> KeybindingsSpec {
+    fn composer_z_binding(binding: KeyBinding) -> String {
         let (key, modifiers) = binding.parts();
         assert_eq!(key, KeyCode::Char('z'));
         let primary_modifier = if modifiers.contains(KeyModifiers::CONTROL) {
@@ -2478,7 +2487,11 @@ mod tests {
         } else {
             ""
         };
-        one(&format!("{primary_modifier}{shift}-z"))
+        format!("{primary_modifier}{shift}-z")
+    }
+
+    fn one_composer_z_binding(binding: KeyBinding) -> KeybindingsSpec {
+        one(&composer_z_binding(binding))
     }
 
     fn expect_conflict(keymap: &TuiKeymap, first: &str, second: &str) {
@@ -2712,6 +2725,21 @@ mod tests {
             runtime.composer.history_search_next,
             vec![key_hint::ctrl(KeyCode::Char('s'))]
         );
+        let undo_redo_modifier = if cfg!(windows) {
+            KeyModifiers::CONTROL
+        } else {
+            KeyModifiers::ALT
+        };
+        assert_eq!(
+            (runtime.composer.undo, runtime.composer.redo),
+            (
+                vec![KeyBinding::new(KeyCode::Char('z'), undo_redo_modifier,)],
+                vec![KeyBinding::new(
+                    KeyCode::Char('z'),
+                    undo_redo_modifier | KeyModifiers::SHIFT,
+                )],
+            )
+        );
         assert_eq!(runtime.editor.kill_whole_line, Vec::new());
     }
 
@@ -2726,6 +2754,30 @@ mod tests {
 
         assert!(runtime.composer.undo.is_empty());
         assert!(runtime.composer.redo.is_empty());
+    }
+
+    #[test]
+    fn undo_defaults_yield_to_existing_editor_chord_prefixes() {
+        let undo = composer_z_binding(default_composer_undo_binding());
+        let redo = composer_z_binding(default_composer_redo_binding());
+        let mut keymap = TuiKeymap::default();
+        keymap.editor.move_line_start = Some(one(&format!("{undo} f10")));
+        keymap.editor.move_line_end = Some(one(&format!("{redo} f11")));
+
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("editor chords should win");
+
+        assert_eq!(
+            (runtime.composer.undo, runtime.composer.redo),
+            (Vec::new(), Vec::new())
+        );
+        assert!(runtime.chords.bindings.iter().any(|binding| {
+            binding.action.context == KeymapContext::Editor
+                && binding.chord.prefix == default_composer_undo_binding()
+        }));
+        assert!(runtime.chords.bindings.iter().any(|binding| {
+            binding.action.context == KeymapContext::Editor
+                && binding.chord.prefix == default_composer_redo_binding()
+        }));
     }
 
     #[test]
