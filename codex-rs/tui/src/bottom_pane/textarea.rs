@@ -360,6 +360,14 @@ impl TextArea {
         }
     }
 
+    /// Finish an active Vim insert session as though it ended with `Esc`.
+    pub(crate) fn finish_vim_insert_session(&mut self) {
+        if self.vim_enabled && self.vim_mode == VimMode::Insert {
+            self.leave_vim_insert_mode();
+            self.finish_pending_vim_change();
+        }
+    }
+
     /// Return whether rapid plain-key bursts should be treated as paste input.
     ///
     /// Paste burst detection is disabled in Vim normal mode so a fast sequence
