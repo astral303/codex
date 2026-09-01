@@ -191,8 +191,10 @@ impl ChatWidget {
 
     pub(crate) fn finish_rate_limit_recovery(&mut self) {
         if std::mem::take(&mut self.input_queue.rate_limit_recovery_pending) {
-            self.submit_initial_user_message_if_pending();
-            self.maybe_send_next_queued_input();
+            let queue_drain = self.submit_initial_user_message_for_queue_drain();
+            if queue_drain == QueueDrain::Continue {
+                self.maybe_send_next_queued_input();
+            }
         }
     }
 

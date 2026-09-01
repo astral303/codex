@@ -118,22 +118,27 @@ impl ChatWidget {
     }
 
     pub(crate) fn submit_initial_user_message_if_pending(&mut self) {
+        let _queue_drain = self.submit_initial_user_message_for_queue_drain();
+    }
+
+    pub(super) fn submit_initial_user_message_for_queue_drain(&mut self) -> QueueDrain {
         if self.suppress_initial_user_message_submit || self.input_queue.rate_limit_recovery_pending
         {
-            return;
+            return QueueDrain::Stop;
         }
         #[cfg(any(target_os = "windows", test))]
         if self.elevated_windows_sandbox_setup_required() {
-            return;
+            return QueueDrain::Stop;
         }
         if self.blocks_direct_input {
             if let Some(user_message) = self.initial_user_message.take() {
                 self.restore_user_message_to_composer(user_message);
             }
-            return;
+            return QueueDrain::Stop;
         }
-        if let Some(user_message) = self.initial_user_message.take() {
-            self.submit_user_message(user_message);
+        match self.initial_user_message.take() {
+            Some(user_message) => self.submit_user_message(user_message),
+            None => QueueDrain::Continue,
         }
     }
 

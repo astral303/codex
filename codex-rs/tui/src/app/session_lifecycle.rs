@@ -793,7 +793,6 @@ impl App {
                 if !recovery_was_pending {
                     self.chat_widget.finish_rate_limit_recovery();
                 }
-                self.chat_widget.maybe_send_next_queued_input();
             }
             Err(err) if self.recover_transport_error(&err) => {}
             Err(err) => {

@@ -1549,32 +1549,34 @@ async fn plan_slash_command_with_hidden_shell_paste_queued_before_session_submit
 
 #[tokio::test]
 async fn rejected_initial_image_does_not_submit_later_queued_prompt() {
-    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let current_model = chat.current_model().to_string();
-    let mut models = chat.model_catalog.try_list_models().expect("model catalog");
-    models
-        .iter_mut()
-        .find(|model| model.model == current_model)
-        .expect("current model")
-        .input_modalities
-        .retain(|modality| *modality != InputModality::Image);
-    chat.model_catalog = Arc::new(ModelCatalog::new(models));
-    let mut initial_message = UserMessage::from("initial prompt");
-    initial_message.remote_image_urls = vec!["https://example.com/image.png".to_string()];
-    chat.initial_user_message = Some(initial_message);
-    chat.queue_user_message(UserMessage::from("queued follow-up"));
-    chat.finish_mcp_startup(Vec::new(), Vec::new());
+    for initial_text in ["initial prompt", "!   "] {
+        let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        let current_model = chat.current_model().to_string();
+        let mut models = chat.model_catalog.try_list_models().expect("model catalog");
+        models
+            .iter_mut()
+            .find(|model| model.model == current_model)
+            .expect("current model")
+            .input_modalities
+            .retain(|modality| *modality != InputModality::Image);
+        chat.model_catalog = Arc::new(ModelCatalog::new(models));
+        let mut initial_message = UserMessage::from(initial_text);
+        initial_message.remote_image_urls = vec!["https://example.com/image.png".to_string()];
+        chat.initial_user_message = Some(initial_message);
+        chat.queue_user_message(UserMessage::from("queued follow-up"));
+        chat.finish_mcp_startup(Vec::new(), Vec::new());
 
-    let mut session = plan_test_session(ThreadId::new());
-    session.model = current_model;
-    chat.handle_thread_session(session);
+        let mut session = plan_test_session(ThreadId::new());
+        session.model = current_model;
+        chat.handle_thread_session(session);
 
-    assert_no_submit_op(&mut op_rx);
-    assert_eq!(chat.bottom_pane.composer_text(), "initial prompt");
-    assert_eq!(
-        chat.queued_user_message_texts(),
-        vec!["queued follow-up".to_string()]
-    );
+        assert_no_submit_op(&mut op_rx);
+        assert_eq!(chat.bottom_pane.composer_text(), initial_text);
+        assert_eq!(
+            chat.queued_user_message_texts(),
+            vec!["queued follow-up".to_string()]
+        );
+    }
 }
 
 #[tokio::test]
