@@ -122,9 +122,16 @@ impl ChatComposer {
     ///
     /// Composer edits clear paste-burst Enter suppression and sync popups.
     pub(super) fn apply_paste(&mut self, pasted: String) -> bool {
+        if self.draft.textarea.vim_query().is_some() {
+            return self.apply_paste_without_history(pasted);
+        }
+        let started_vim_edit = self.begin_direct_vim_edit();
         let before_edit = self.snapshot_draft();
         let needs_redraw = self.apply_paste_without_history(pasted);
         self.record_edit_since(before_edit);
+        if started_vim_edit {
+            self.finish_vim_edit();
+        }
         needs_redraw
     }
 
