@@ -54,6 +54,7 @@ impl LocalSettings {
                 resume_cwd: config.tui_resume_cwd,
                 keymap: config.tui_keymap.clone(),
                 model_availability_nux: config.model_availability_nux.clone(),
+                keep_in_progress_tasks_visible: config.tui_keep_in_progress_tasks_visible,
                 terminal_resize_reflow_max_rows: match config.terminal_resize_reflow.max_rows {
                     TerminalResizeReflowMaxRows::Auto => None,
                     TerminalResizeReflowMaxRows::Disabled => Some(0),

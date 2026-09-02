@@ -187,6 +187,9 @@ pub(crate) struct MultiSelectPicker {
     /// Whether left/right arrow reordering is enabled.
     ordering_enabled: bool,
 
+    /// Maximum display length for item names before truncation.
+    item_name_truncate_len: usize,
+
     /// Shared list keybindings for navigation and completion.
     keymap: ListKeymap,
 
@@ -310,7 +313,7 @@ impl MultiSelectPicker {
             let is_selected = self.state.selected_idx == Some(visible_idx);
             let prefix = if is_selected { '›' } else { ' ' };
             let marker = if item.enabled { 'x' } else { ' ' };
-            let item_name = truncate_text(&item.name, ITEM_NAME_TRUNCATE_LEN);
+            let item_name = truncate_text(&item.name, self.item_name_truncate_len);
             let name = format!("{prefix} [{marker}] {item_name}");
             rows.push(GenericDisplayRow {
                 name,
@@ -722,6 +725,7 @@ pub(crate) struct MultiSelectPickerBuilder {
     instructions: Vec<Span<'static>>,
     items: Vec<MultiSelectItem>,
     ordering_enabled: bool,
+    item_name_truncate_len: usize,
     app_event_tx: AppEventSender,
     keymap: ListKeymap,
     preview_builder: Option<PreviewCallback>,
@@ -739,6 +743,7 @@ impl MultiSelectPickerBuilder {
             instructions: Vec::new(),
             items: Vec::new(),
             ordering_enabled: false,
+            item_name_truncate_len: ITEM_NAME_TRUNCATE_LEN,
             app_event_tx,
             keymap: RuntimeKeymap::defaults().list,
             preview_builder: None,
@@ -759,6 +764,12 @@ impl MultiSelectPickerBuilder {
     /// Reordering is only active when the search query is empty.
     pub fn enable_ordering(mut self) -> Self {
         self.ordering_enabled = true;
+        self
+    }
+
+    /// Sets the maximum display length for item names before truncation.
+    pub fn item_name_truncate_len(mut self, item_name_truncate_len: usize) -> Self {
+        self.item_name_truncate_len = item_name_truncate_len;
         self
     }
 
@@ -865,6 +876,7 @@ impl MultiSelectPickerBuilder {
             header: Box::new(header),
             footer_hint: Line::from(instructions),
             ordering_enabled: self.ordering_enabled,
+            item_name_truncate_len: self.item_name_truncate_len,
             keymap: self.keymap,
             search_query: String::new(),
             filtered_indices: Vec::new(),

@@ -547,6 +547,12 @@ impl App {
             return true;
         }
 
+        if self.keymap.app.toggle_task_list.is_pressed(key_event)
+            && self.chat_widget.toggle_task_list()
+        {
+            return true;
+        }
+
         if self.keymap.app.open_agents.is_pressed(key_event) {
             self.open_agents_overview(app_server);
             return true;
