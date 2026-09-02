@@ -233,16 +233,26 @@ impl ChatWidget {
             } else {
                 self.ambient_pet_wrap_reserved_cols()
             };
-            self.bottom_pane
-                .as_renderable_with_options(crate::bottom_pane::ComposerRenderOptions {
-                    composer_gap,
-                    warning_count: self.warning_display_state.count,
-                    textarea_right_reserve: right_reserve,
-                    separate_status_line: command_popup_placement
-                        != crate::bottom_pane::CommandPopupPlacement::AboveComposer,
-                    command_popup_placement,
-                    footer,
-                })
+            let options = crate::bottom_pane::ComposerRenderOptions {
+                composer_gap,
+                warning_count: self.warning_display_state.count,
+                textarea_right_reserve: right_reserve,
+                separate_status_line: command_popup_placement
+                    != crate::bottom_pane::CommandPopupPlacement::AboveComposer,
+                command_popup_placement,
+                footer,
+            };
+            if self.task_list_panel.is_visible() && self.bottom_pane.no_modal_or_popup_active() {
+                self.bottom_pane
+                    .as_renderable_with_options_and_above_composer(
+                        options,
+                        RenderableItem::Owned(Box::new(
+                            self.task_list_panel.as_renderable(right_reserve),
+                        )),
+                    )
+            } else {
+                self.bottom_pane.as_renderable_with_options(options)
+            }
         }
     }
 
