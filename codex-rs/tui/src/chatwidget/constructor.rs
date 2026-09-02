@@ -83,6 +83,10 @@ impl ChatWidget {
             runtime_keymap.as_ref().unwrap_or(&default_keymap),
             current_terminal_info,
         );
+        let task_list_shortcut_hint = runtime_keymap
+            .as_ref()
+            .unwrap_or(&default_keymap)
+            .primary_hint(crate::keymap::KeymapContext::Global, "toggle_task_list");
         let pet_http_client = codex_http_client::RouteAwareClientPool::new(
             config.http_client_factory(),
             codex_http_client::ClientRouteClass::Other,
@@ -109,6 +113,10 @@ impl ChatWidget {
                 skills: None,
             }),
             transcript: TranscriptState::new(active_cell),
+            task_list_panel: TaskListPanel::new(
+                config.tui_keep_in_progress_tasks_visible,
+                task_list_shortcut_hint,
+            ),
             raw_output_mode: config.tui_raw_output_mode,
             config,
             effective_service_tier,

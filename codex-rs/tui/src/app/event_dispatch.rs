@@ -2856,6 +2856,32 @@ impl App {
                     }
                 }
             }
+            AppEvent::TaskListSettingsUpdated {
+                keep_in_progress_tasks_visible,
+            } => {
+                let edit = crate::legacy_core::config::edit::tui_keep_in_progress_tasks_visible_edit(
+                    keep_in_progress_tasks_visible,
+                );
+                let apply_result = ConfigEditsBuilder::for_config(&self.config)
+                    .with_edits([edit])
+                    .apply()
+                    .await;
+                match apply_result {
+                    Ok(()) => {
+                        self.config.tui_keep_in_progress_tasks_visible =
+                            keep_in_progress_tasks_visible;
+                        self.chat_widget
+                            .set_keep_in_progress_tasks_visible(keep_in_progress_tasks_visible);
+                    }
+                    Err(err) => {
+                        let error = format_config_error(&err);
+                        tracing::error!(error = %error, "failed to persist task list setting; keeping previous selection");
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to save task list setting: {error}"
+                        ));
+                    }
+                }
+            }
             AppEvent::StatusLineBranchUpdated { cwd, branch } => {
                 self.chat_widget.set_status_line_branch(cwd, branch);
                 self.refresh_status_line();

@@ -342,6 +342,13 @@ impl App {
             return;
         }
 
+        if app_keymap_shortcuts_available
+            && self.keymap.app.toggle_task_list.is_pressed(key_event)
+            && self.chat_widget.toggle_task_list()
+        {
+            return;
+        }
+
         if app_keymap_shortcuts_available && self.keymap.app.open_agents.is_pressed(key_event) {
             self.open_agents_overview(app_server);
             return;
