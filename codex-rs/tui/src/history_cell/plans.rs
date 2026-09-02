@@ -16,6 +16,15 @@ pub(crate) struct StreamingPlanTailCell {
     is_stream_continuation: bool,
 }
 
+/// Marker and text style for a plan step, shared by the transcript cell and the task-list panel.
+pub(crate) fn plan_step_marker_and_style(status: &StepStatus) -> (&'static str, Style) {
+    match status {
+        StepStatus::Completed => ("✔ ", Style::default().crossed_out().dim()),
+        StepStatus::InProgress => ("□ ", Style::default().fg(accent_color()).bold()),
+        StepStatus::Pending => ("□ ", Style::default().dim()),
+    }
+}
+
 impl PartialEq for StreamingPlanTailCell {
     fn eq(&self, other: &Self) -> bool {
         self.is_stream_continuation == other.is_stream_continuation
@@ -250,11 +259,7 @@ impl HistoryCell for PlanUpdateCell {
             StepStatus::Completed => 2,
         });
         for (index, item) in steps.into_iter().take(DETAIL_PREVIEW_LINES).enumerate() {
-            let (marker, style) = match item.status {
-                StepStatus::Completed => ("✔ ", Style::default().crossed_out().dim()),
-                StepStatus::InProgress => ("□ ", Style::default().fg(accent_color()).bold()),
-                StepStatus::Pending => ("□ ", Style::default().dim()),
-            };
+            let (marker, style) = plan_step_marker_and_style(&item.status);
             let step = item.step.split_whitespace().collect::<Vec<_>>().join(" ");
             lines.push(clipped_line(
                 Line::from(vec![
@@ -289,11 +294,7 @@ impl HistoryCell for PlanUpdateCell {
         };
 
         let render_step = |status: &StepStatus, text: &str| -> Vec<HyperlinkLine> {
-            let (box_str, step_style) = match status {
-                StepStatus::Completed => ("✔ ", Style::default().crossed_out().dim()),
-                StepStatus::InProgress => ("□ ", Style::default().fg(accent_color()).bold()),
-                StepStatus::Pending => ("□ ", Style::default().dim()),
-            };
+            let (box_str, step_style) = plan_step_marker_and_style(status);
 
             let opts = RtOptions::new(width.saturating_sub(4).max(1) as usize)
                 .initial_indent(box_str.into())

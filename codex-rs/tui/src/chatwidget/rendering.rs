@@ -257,7 +257,16 @@ impl ChatWidget {
             options.textarea_right_reserve = right_reserve;
             options.separate_status_line = options.command_popup_placement
                 != crate::bottom_pane::CommandPopupPlacement::AboveComposer;
-            self.bottom_pane.backdrop_with_options(options)
+            if self.task_list_panel.is_visible() && self.bottom_pane.no_modal_or_popup_active() {
+                self.bottom_pane.backdrop_with_options_and_above_composer(
+                    options,
+                    RenderableItem::Owned(Box::new(
+                        self.task_list_panel.as_renderable(right_reserve),
+                    )),
+                )
+            } else {
+                self.bottom_pane.backdrop_with_options(options)
+            }
         }
     }
 
