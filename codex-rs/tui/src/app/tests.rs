@@ -105,6 +105,8 @@ mod startup_warnings_tests;
 mod stream_animation_tests;
 #[path = "tests/streaming_interleave_e2e.rs"]
 mod streaming_interleave_e2e;
+#[path = "tests/task_list_tests.rs"]
+mod task_list_tests;
 #[path = "tests/thread_usage.rs"]
 mod thread_usage;
 #[path = "tests/transcript_composer.rs"]
