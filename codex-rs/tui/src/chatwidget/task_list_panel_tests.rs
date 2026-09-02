@@ -367,7 +367,7 @@ fn removing_the_last_shortcut_collapses_an_expanded_panel() {
 }
 
 #[test]
-fn fully_reserved_width_consumes_no_panel_or_footer_height() {
+fn fully_reserved_width_consumes_no_panel_height() {
     let panel = visible_panel(plan(vec![StepStatus::InProgress]));
 
     assert_eq!(
@@ -376,16 +376,10 @@ fn fully_reserved_width_consumes_no_panel_or_footer_height() {
             .desired_height(/*width*/ 20),
         0
     );
-    assert_eq!(
-        panel
-            .as_footer_renderable(/*right_reserved_cols*/ 20)
-            .desired_height(/*width*/ 20),
-        0
-    );
 }
 
 #[test]
-fn task_statuses_render_with_distinct_styles() {
+fn task_statuses_render_markers_and_text_with_distinct_styles() {
     let panel = visible_panel(plan(vec![
         StepStatus::Completed,
         StepStatus::InProgress,
@@ -395,25 +389,15 @@ fn task_statuses_render_with_distinct_styles() {
         &panel, /*width*/ 40, /*height*/ 4, /*right_reserved_cols*/ 0,
     );
 
-    let actual = [1, 2, 3].map(|row| buffer[(3, row)].style());
+    let actual = [1, 2, 3].map(|row| (buffer[(3, row)].style(), buffer[(5, row)].style()));
+    let base_style = Style::default()
+        .fg(Color::Reset)
+        .bg(Color::Reset)
+        .underline_color(Color::Reset);
     let expected = [
-        Style::default()
-            .fg(Color::Reset)
-            .bg(Color::Reset)
-            .underline_color(Color::Reset)
-            .crossed_out()
-            .dim(),
-        Style::default()
-            .fg(Color::Reset)
-            .bg(Color::Reset)
-            .underline_color(Color::Reset)
-            .cyan()
-            .bold(),
-        Style::default()
-            .fg(Color::Reset)
-            .bg(Color::Reset)
-            .underline_color(Color::Reset)
-            .dim(),
+        (base_style.dim(), base_style.crossed_out().dim()),
+        (base_style, base_style.cyan().bold()),
+        (base_style, base_style.dim()),
     ];
     assert_eq!(actual, expected);
 }

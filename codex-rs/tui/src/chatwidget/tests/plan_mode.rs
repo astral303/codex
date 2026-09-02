@@ -1776,36 +1776,3 @@ async fn user_turn_includes_personality_from_config() {
         other => panic!("expected Op::UserTurn with friendly personality, got {other:?}"),
     }
 }
-
-#[tokio::test]
-async fn plan_update_renders_history_cell() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let update = UpdatePlanArgs {
-        explanation: Some("Adapting plan".to_string()),
-        plan: vec![
-            PlanItemArg {
-                step: "Explore codebase".into(),
-                status: StepStatus::Completed,
-            },
-            PlanItemArg {
-                step: "Implement feature".into(),
-                status: StepStatus::InProgress,
-            },
-            PlanItemArg {
-                step: "Write tests".into(),
-                status: StepStatus::Pending,
-            },
-        ],
-    };
-    chat.on_plan_update(update);
-    let cells = drain_insert_history(&mut rx);
-    assert!(!cells.is_empty(), "expected plan update cell to be sent");
-    let blob = lines_to_single_string(cells.last().unwrap());
-    assert!(
-        blob.contains("Updated Plan"),
-        "missing plan header: {blob:?}"
-    );
-    assert!(blob.contains("Explore codebase"));
-    assert!(blob.contains("Implement feature"));
-    assert!(blob.contains("Write tests"));
-}

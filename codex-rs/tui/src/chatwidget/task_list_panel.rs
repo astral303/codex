@@ -28,10 +28,9 @@ const MAX_TASK_STEP_GRAPHEMES: usize = 300;
 const CONTINUATION_GUTTER_WIDTH: usize = 3;
 const STATUS_MARKER_WIDTH: usize = 2;
 const TASK_PREFIX_WIDTH: usize = CONTINUATION_GUTTER_WIDTH + STATUS_MARKER_WIDTH;
-const FOOTER_TOP_PADDING: u16 = 1;
-const HIDDEN_BEFORE_GUTTER: &str = "⇈  ";
-const HIDDEN_AFTER_GUTTER: &str = "⇊  ";
-const HIDDEN_BOTH_GUTTER: &str = "⇈⇊ ";
+const HIDDEN_BEFORE_GUTTER: &str = "↑↑ ";
+const HIDDEN_AFTER_GUTTER: &str = "↓↓ ";
+const HIDDEN_BOTH_GUTTER: &str = "↑↓ ";
 const EMPTY_GUTTER: &str = "   ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,20 +156,10 @@ impl TaskListPanel {
         self.render_enabled && self.plan.is_some()
     }
 
-    #[cfg(test)]
     pub(super) fn as_renderable(&self, right_reserved_cols: u16) -> impl Renderable + '_ {
         TaskListPanelRenderable {
             panel: self,
             right_reserved_cols,
-            top_padding: 0,
-        }
-    }
-
-    pub(super) fn as_footer_renderable(&self, right_reserved_cols: u16) -> impl Renderable + '_ {
-        TaskListPanelRenderable {
-            panel: self,
-            right_reserved_cols,
-            top_padding: FOOTER_TOP_PADDING,
         }
     }
 
@@ -262,7 +251,6 @@ impl TaskListPanel {
 struct TaskListPanelRenderable<'a> {
     panel: &'a TaskListPanel,
     right_reserved_cols: u16,
-    top_padding: u16,
 }
 
 impl Renderable for TaskListPanelRenderable<'_> {
@@ -273,9 +261,9 @@ impl Renderable for TaskListPanelRenderable<'_> {
 
         let content_area = Rect::new(
             area.x,
-            area.y.saturating_add(self.top_padding),
+            area.y,
             area.width.saturating_sub(self.right_reserved_cols),
-            area.height.saturating_sub(self.top_padding),
+            area.height,
         );
         if content_area.width == 0 || content_area.height == 0 {
             return;
@@ -294,12 +282,7 @@ impl Renderable for TaskListPanelRenderable<'_> {
         if content_width == 0 {
             return 0;
         }
-        let content_height = self.panel.desired_height(content_width);
-        if content_height == 0 {
-            0
-        } else {
-            content_height.saturating_add(self.top_padding)
-        }
+        self.panel.desired_height(content_width)
     }
 }
 
@@ -388,12 +371,12 @@ fn continuation_gutter(window: TaskWindow, index: usize, total: usize) -> &'stat
 }
 
 fn compact_task_line(item: &PlanItemArg, gutter: &str, width: u16) -> Line<'static> {
-    let (marker, style) = task_marker_and_style(&item.status);
+    let (marker, step_style) = task_marker_and_step_style(&item.status);
     truncate_line_with_ellipsis_if_overflow(
         vec![
             gutter.to_string().dim(),
-            marker.set_style(style),
-            item.step.clone().set_style(style),
+            marker,
+            item.step.clone().set_style(step_style),
         ]
         .into(),
         usize::from(width),
@@ -401,10 +384,10 @@ fn compact_task_line(item: &PlanItemArg, gutter: &str, width: u16) -> Line<'stat
 }
 
 fn expanded_task_lines(item: &PlanItemArg, gutter: &str, width: u16) -> Vec<Line<'static>> {
-    let (marker, style) = task_marker_and_style(&item.status);
-    let prefix = Line::from(vec![gutter.to_string().dim(), marker.set_style(style)]);
+    let (marker, step_style) = task_marker_and_step_style(&item.status);
+    let prefix = Line::from(vec![gutter.to_string().dim(), marker]);
     let continuation = Line::from(" ".repeat(TASK_PREFIX_WIDTH));
-    let step = Line::from(Span::from(item.step.clone()).set_style(style));
+    let step = Line::from(Span::from(item.step.clone()).set_style(step_style));
     let wrapped = adaptive_wrap_line(
         &step,
         RtOptions::new(usize::from(width.max(1)))
@@ -416,11 +399,11 @@ fn expanded_task_lines(item: &PlanItemArg, gutter: &str, width: u16) -> Vec<Line
     lines
 }
 
-fn task_marker_and_style(status: &StepStatus) -> (&'static str, Style) {
+fn task_marker_and_step_style(status: &StepStatus) -> (Span<'static>, Style) {
     match status {
-        StepStatus::Completed => ("✔ ", Style::default().crossed_out().dim()),
-        StepStatus::InProgress => ("□ ", Style::default().cyan().bold()),
-        StepStatus::Pending => ("□ ", Style::default().dim()),
+        StepStatus::Completed => ("✔ ".dim(), Style::default().crossed_out().dim()),
+        StepStatus::InProgress => ("□ ".into(), Style::default().cyan().bold()),
+        StepStatus::Pending => ("□ ".into(), Style::default().dim()),
     }
 }
 

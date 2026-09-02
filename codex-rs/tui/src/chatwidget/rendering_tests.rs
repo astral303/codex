@@ -1,9 +1,14 @@
 use super::*;
 use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
+use crate::slash_command::SlashCommand;
+use codex_protocol::plan_tool::PlanItemArg;
+use codex_protocol::plan_tool::StepStatus;
+use codex_protocol::plan_tool::UpdatePlanArgs;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 #[derive(Debug)]
 struct CountingHistoryCell {
@@ -73,6 +78,21 @@ fn contains_text(buffer: &Buffer, text: &str) -> bool {
                 .collect::<String>()
                 .contains(text)
         })
+}
+
+fn buffer_text(buffer: &Buffer) -> String {
+    buffer
+        .content
+        .chunks(usize::from(buffer.area.width))
+        .map(|row| {
+            row.iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
@@ -175,6 +195,103 @@ async fn initial_session_header_starts_at_the_top_of_the_viewport() {
     │ directory: /tmp/project               │
     ╰───────────────────────────────────────╯
     ");
+}
+
+#[tokio::test]
+async fn constrained_layout_keeps_tasks_between_transcript_and_composer() {
+    let (mut widget, _sender, _events, _operations) = make_chatwidget_manual_with_sender().await;
+    widget.set_keep_in_progress_tasks_visible(/*enabled*/ true);
+    widget.turn_lifecycle.start(Instant::now());
+    widget.bottom_pane.set_task_running(/*running*/ true);
+    widget.bottom_pane.ensure_status_indicator();
+    widget
+        .bottom_pane
+        .set_composer_text("continue work".to_string(), Vec::new(), Vec::new());
+    widget.on_plan_update(UpdatePlanArgs {
+        explanation: None,
+        plan: vec![
+            PlanItemArg {
+                step: "Completed task".to_string(),
+                status: StepStatus::Completed,
+            },
+            PlanItemArg {
+                step: "Current task".to_string(),
+                status: StepStatus::InProgress,
+            },
+            PlanItemArg {
+                step: "Pending task one".to_string(),
+                status: StepStatus::Pending,
+            },
+            PlanItemArg {
+                step: "Pending task two".to_string(),
+                status: StepStatus::Pending,
+            },
+            PlanItemArg {
+                step: "Pending task three".to_string(),
+                status: StepStatus::Pending,
+            },
+            PlanItemArg {
+                step: "Pending task four".to_string(),
+                status: StepStatus::Pending,
+            },
+        ],
+    });
+    widget.transcript.active_cell = Some(Box::new(CountingHistoryCell {
+        desired_height_calls: Arc::new(AtomicUsize::new(0)),
+        display_lines_calls: Arc::new(AtomicUsize::new(0)),
+        desired_height: 4,
+        line_count: 4,
+        stable_height: true,
+    }));
+    let area = Rect::new(0, 0, /*width*/ 48, /*height*/ 18);
+    let mut buffer = Buffer::empty(area);
+    widget.as_renderable().render(area, &mut buffer);
+    let rendered = buffer_text(&buffer);
+
+    let transcript_position = rendered.find("frame").expect("transcript row");
+    let working_position = rendered.find("Working").expect("working status");
+    let task_position = rendered.find("Tasks").expect("task panel");
+    let composer_position = rendered.find("continue work").expect("composer draft");
+    assert!(transcript_position < working_position);
+    assert!(working_position < task_position);
+    assert!(task_position < composer_position);
+    let rendered_lines = rendered.lines().collect::<Vec<_>>();
+    let composer_line = rendered_lines
+        .iter()
+        .position(|line| line.contains("continue work"))
+        .expect("composer line");
+    assert_eq!(rendered_lines[composer_line - 1], "");
+    insta::assert_snapshot!("task_list_constrained_chatwidget_layout", rendered);
+}
+
+#[tokio::test]
+async fn modal_suppresses_task_panel_until_dismissed() {
+    let (mut widget, _sender, _events, _operations) = make_chatwidget_manual_with_sender().await;
+    widget.set_keep_in_progress_tasks_visible(/*enabled*/ true);
+    widget.on_plan_update(UpdatePlanArgs {
+        explanation: None,
+        plan: vec![PlanItemArg {
+            step: "Task hidden by modal".to_string(),
+            status: StepStatus::InProgress,
+        }],
+    });
+    assert!(contains_text(
+        &render_frame(&widget, /*width*/ 80),
+        "Task hidden by modal"
+    ));
+
+    widget.dispatch_command_with_args(SlashCommand::Tasks, String::new(), Vec::new());
+    let modal = render_frame(&widget, /*width*/ 80);
+
+    assert!(!contains_text(&modal, "Task hidden by modal"));
+    insta::assert_snapshot!("task_list_modal_suppression", buffer_text(&modal));
+
+    widget.handle_key_event(KeyEvent::from(KeyCode::Esc));
+
+    assert!(contains_text(
+        &render_frame(&widget, /*width*/ 80),
+        "Task hidden by modal"
+    ));
 }
 
 #[tokio::test]
