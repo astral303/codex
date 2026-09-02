@@ -201,6 +201,15 @@ impl ChatWidget {
                 command_center_available: self.remote_connection.is_some(),
                 transcript_hint: self.bottom_pane.transcript_shortcut_hint(),
             }))
+        } else if self.task_list_panel.is_visible() && self.bottom_pane.no_modal_or_popup_active() {
+            self.bottom_pane
+                .as_renderable_with_composer_right_reserve_and_above_composer(
+                    active_cell_right_reserve,
+                    RenderableItem::Owned(Box::new(
+                        self.task_list_panel
+                            .as_renderable(active_cell_right_reserve),
+                    )),
+                )
         } else {
             self.bottom_pane
                 .as_renderable_with_composer_right_reserve(active_cell_right_reserve)
