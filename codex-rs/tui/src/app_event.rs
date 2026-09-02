@@ -1294,6 +1294,11 @@ pub(crate) enum AppEvent {
     /// Dismiss the status-line setup UI without changing config.
     StatusLineSetupCancelled,
 
+    /// Apply the persistent task-list setting confirmed through `/tasks`.
+    TaskListSettingsUpdated {
+        keep_in_progress_tasks_visible: bool,
+    },
+
     /// Apply a user-confirmed terminal-title item ordering/selection.
     TerminalTitleSetup {
         items: Vec<TerminalTitleItem>,

@@ -174,6 +174,9 @@ impl ChatWidget {
         self.chat_keymap = runtime_keymap.chat.clone();
         self.queued_message_edit_hint_binding =
             queued_message_edit_hint_binding(runtime_keymap, terminal_info());
+        self.task_list_panel.set_shortcut_hint(
+            runtime_keymap.primary_hint(crate::keymap::KeymapContext::Global, "toggle_task_list"),
+        );
         self.bottom_pane
             .set_queued_message_edit_binding(self.queued_message_edit_hint_binding);
         self.bottom_pane.set_keymap_bindings(runtime_keymap);
