@@ -1,0 +1,12 @@
+---
+source: tui/src/chatwidget/task_list_panel_tests.rs
+expression: "render_panel(&panel, 34, height, 0)"
+---
+Tasks 1/3 · ⌥ + p collapse
+   ✔ Inspect
+     https://example.com/path
+     before editing
+   □ Implement the persistent
+     checklist above the composer
+   □ Verify narrow and constrained
+     layouts
