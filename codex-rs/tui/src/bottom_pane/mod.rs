@@ -1877,6 +1877,17 @@ impl BottomPane {
         &'_ self,
         composer_right_reserve: u16,
     ) -> RenderableItem<'_> {
+        self.as_renderable_with_composer_right_reserve_and_above_composer(
+            composer_right_reserve,
+            RenderableItem::Owned(Box::new(())),
+        )
+    }
+
+    pub(crate) fn as_renderable_with_composer_right_reserve_and_above_composer<'a>(
+        &'a self,
+        composer_right_reserve: u16,
+        above_composer: RenderableItem<'a>,
+    ) -> RenderableItem<'a> {
         if (self.is_task_running || !self.view_stack.is_empty())
             && let Some(banner) = &self.inline_banner
         {
@@ -1953,6 +1964,7 @@ impl BottomPane {
                     right_reserve: composer_right_reserve,
                 }))
             };
+            flex2.push(/*flex*/ 1, above_composer);
             flex2.push(/*flex*/ 0, composer);
             RenderableItem::Owned(Box::new(flex2))
         }

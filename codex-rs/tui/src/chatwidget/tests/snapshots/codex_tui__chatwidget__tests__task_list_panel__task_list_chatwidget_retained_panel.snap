@@ -1,0 +1,8 @@
+---
+source: tui/src/chatwidget/tests/task_list_panel.rs
+expression: "render_task_panel(&chat, 48)"
+---
+Tasks 1/3 · ⌥ + p expand
+   ✔ Explore codebase
+   □ Implement feature
+   □ Write tests

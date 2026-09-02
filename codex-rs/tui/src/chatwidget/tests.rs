@@ -266,6 +266,8 @@ mod slash_commands;
 mod status_and_layout;
 mod status_command_tests;
 mod status_surface_previews;
+#[path = "tests/task_list_panel.rs"]
+mod task_list_panel;
 mod terminal_title;
 mod usage;
 

@@ -68,13 +68,25 @@ impl ChatWidget {
                 })),
             );
         }
+        let bottom_pane_renderable =
+            if self.task_list_panel.is_visible() && self.bottom_pane.no_modal_or_popup_active() {
+                self.bottom_pane
+                    .as_renderable_with_composer_right_reserve_and_above_composer(
+                        active_cell_right_reserve,
+                        RenderableItem::Owned(Box::new(
+                            self.task_list_panel
+                                .as_renderable(active_cell_right_reserve),
+                        )),
+                    )
+            } else {
+                self.bottom_pane
+                    .as_renderable_with_composer_right_reserve(active_cell_right_reserve)
+            };
         flex.push(
             /*flex*/ 0,
-            self.bottom_pane
-                .as_renderable_with_composer_right_reserve(active_cell_right_reserve)
-                .inset(Insets::tlbr(
-                    /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
-                )),
+            bottom_pane_renderable.inset(Insets::tlbr(
+                /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
+            )),
         );
         RenderableItem::Owned(Box::new(flex))
     }

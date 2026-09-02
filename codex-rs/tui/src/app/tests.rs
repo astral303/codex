@@ -36,6 +36,8 @@ mod session_summary;
 mod startup;
 #[path = "tests/stream_animation_tests.rs"]
 mod stream_animation_tests;
+#[path = "tests/task_list_tests.rs"]
+mod task_list_tests;
 #[path = "tests/thread_usage.rs"]
 mod thread_usage;
 #[path = "tests/turn_submission.rs"]
