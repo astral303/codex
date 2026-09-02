@@ -398,6 +398,14 @@ impl ChatWidget {
                     control: crate::app_event::VoiceControl::Toggle,
                 });
             }
+            SlashCommand::Tasks => {
+                let view = crate::bottom_pane::tasks_settings_view(
+                    self.config.tui_keep_in_progress_tasks_visible,
+                    self.app_event_tx.clone(),
+                    self.bottom_pane.list_keymap(),
+                );
+                self.bottom_pane.show_view(Box::new(view));
+            }
             SlashCommand::Side | SlashCommand::Btw => {
                 self.request_empty_side_conversation(cmd);
             }
@@ -1310,6 +1318,7 @@ impl ChatWidget {
             | SlashCommand::Model
             | SlashCommand::Plan
             | SlashCommand::Goal
+            | SlashCommand::Tasks
             | SlashCommand::Side
             | SlashCommand::Btw
             | SlashCommand::Keymap

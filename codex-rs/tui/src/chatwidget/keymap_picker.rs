@@ -171,6 +171,9 @@ impl ChatWidget {
         self.local_settings.tui.keymap = keymap_config;
         self.copy_last_response_binding = runtime_keymap.app.copy.clone();
         self.chat_keymap = runtime_keymap.chat.clone();
+        self.task_list_panel.set_shortcut_hint(
+            runtime_keymap.primary_hint(crate::keymap::KeymapContext::Global, "toggle_task_list"),
+        );
         self.bottom_pane.set_keymap_bindings(runtime_keymap);
         self.update_realtime_footer();
         self.request_redraw();
