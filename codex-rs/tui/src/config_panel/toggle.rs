@@ -17,6 +17,7 @@ pub(crate) enum ConfigToggle {
     CollapseTurnDetails,
     ComposerStars,
     CopyOnSelectClearSelection,
+    KeepInProgressTasksVisible,
     Notifications,
     PasteDetection,
     StartInVimMode,
@@ -105,6 +106,7 @@ impl ConfigToggle {
             Self::AutomaticRecaps => ("auto_recap", enabled),
             Self::CollapseTurnDetails => ("collapse_turn_details", enabled),
             Self::CopyOnSelectClearSelection => ("copy_on_select_clear_selection", enabled),
+            Self::KeepInProgressTasksVisible => ("keep_in_progress_tasks_visible", enabled),
             Self::PasteDetection => ("disable_paste_burst", !enabled),
             Self::StartInVimMode => ("vim_mode_default", enabled),
             Self::StatusLineColors => ("status_line_use_colors", enabled),
@@ -123,6 +125,7 @@ impl ConfigToggle {
             Self::CollapseTurnDetails => tui.collapse_turn_details,
             Self::ComposerStars => tui.effects.starfield,
             Self::CopyOnSelectClearSelection => tui.copy_on_select_clear_selection,
+            Self::KeepInProgressTasksVisible => tui.keep_in_progress_tasks_visible,
             Self::Notifications => !matches!(
                 tui.notification_settings.notifications,
                 Notifications::Enabled(false)
@@ -145,6 +148,9 @@ impl ConfigToggle {
             Self::ComposerStars => target.effects.starfield = source.effects.starfield,
             Self::CopyOnSelectClearSelection => {
                 target.copy_on_select_clear_selection = source.copy_on_select_clear_selection;
+            }
+            Self::KeepInProgressTasksVisible => {
+                target.keep_in_progress_tasks_visible = source.keep_in_progress_tasks_visible;
             }
             Self::Notifications => {
                 target.notification_settings.notifications =
