@@ -220,6 +220,7 @@ impl ChatWidget {
         self.clear_active_hook_cell();
         self.clear_guardian_review_status();
         self.turn_lifecycle.finish();
+        self.task_list_panel.on_turn_finished();
         self.clear_safety_buffering();
         self.update_task_running_state();
         self.running_commands.clear();
@@ -367,6 +368,7 @@ impl ChatWidget {
         self.input_queue.user_turn_pending_start = false;
         self.clear_guardian_review_status();
         self.turn_lifecycle.finish();
+        self.task_list_panel.on_turn_finished();
         self.update_task_running_state();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
@@ -578,6 +580,13 @@ impl ChatWidget {
 
     pub(super) fn on_plan_update(&mut self, update: UpdatePlanArgs) {
         self.transcript.saw_plan_update_this_turn = true;
+        let turn_state = if self.turn_lifecycle.agent_turn_running {
+            TaskListTurnState::Running
+        } else {
+            TaskListTurnState::Idle
+        };
+        self.task_list_panel
+            .replace_plan(update.plan.clone(), turn_state);
         let total = update.plan.len();
         let completed = update
             .plan
