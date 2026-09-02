@@ -2392,7 +2392,11 @@ impl BottomPane {
         &'a self,
         options: ComposerRenderOptions<'a>,
     ) -> RenderableItem<'a> {
-        self.renderable_for_views(options, &self.view_stack)
+        self.renderable_for_views(
+            options,
+            &self.view_stack,
+            RenderableItem::Owned(Box::new(())),
+        )
     }
 
     pub(crate) fn centered_dialog(&self) -> Option<CenteredView<'_>> {
@@ -2407,18 +2411,27 @@ impl BottomPane {
         &'a self,
         options: ComposerRenderOptions<'a>,
     ) -> RenderableItem<'a> {
+        self.backdrop_with_options_and_above_composer(options, RenderableItem::Owned(Box::new(())))
+    }
+
+    pub(crate) fn backdrop_with_options_and_above_composer<'a>(
+        &'a self,
+        options: ComposerRenderOptions<'a>,
+        pinned_above_composer: RenderableItem<'a>,
+    ) -> RenderableItem<'a> {
         let views = if self.centered_dialog().is_some() {
             &self.view_stack[..self.view_stack.len() - 1]
         } else {
             &self.view_stack
         };
-        self.renderable_for_views(options, views)
+        self.renderable_for_views(options, views, pinned_above_composer)
     }
 
     fn renderable_for_views<'a>(
         &'a self,
         mut options: ComposerRenderOptions<'a>,
         views: &'a [Box<dyn BottomPaneView>],
+        pinned_above_composer: RenderableItem<'a>,
     ) -> RenderableItem<'a> {
         if self.warnings_active()
             && let Some(warnings) = &self.warnings_view
@@ -2566,6 +2579,7 @@ impl BottomPane {
                     options: self.composer.resolve_render_options(options),
                 }))
             };
+            flex2.push(/*flex*/ 1, pinned_above_composer);
             flex2.push(/*flex*/ 0, composer);
             RenderableItem::Owned(Box::new(flex2))
         }
