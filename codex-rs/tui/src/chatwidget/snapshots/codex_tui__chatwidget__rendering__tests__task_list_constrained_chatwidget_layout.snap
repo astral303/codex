@@ -1,0 +1,22 @@
+---
+source: tui/src/chatwidget/rendering_tests.rs
+expression: rendered
+---
+
+frame 1 row 0
+frame 1 row 1
+frame 1 row 2
+frame 1 row 3
+
+• Working (0s • esc to interrupt)
+
+Tasks 1/6 · 1 hidden · ⌥ + p expand
+   ✔ Completed task
+   □ Current task
+   □ Pending task one
+   □ Pending task two
+↓↓ □ Pending task three
+
+› continue work
+
+  tab to queue message       100% context left
