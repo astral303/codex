@@ -51,6 +51,17 @@ impl App {
         if matches!(
             preference,
             ConfigPreference::Toggle {
+                setting: ConfigToggle::KeepInProgressTasksVisible,
+                ..
+            }
+        ) {
+            self.chat_widget.set_keep_in_progress_tasks_visible(
+                ConfigToggle::KeepInProgressTasksVisible.enabled(&resolved.tui),
+            );
+        }
+        if matches!(
+            preference,
+            ConfigPreference::Toggle {
                 setting: ConfigToggle::Notifications,
                 ..
             }

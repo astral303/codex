@@ -298,6 +298,16 @@ fn settings(tui: &Tui, status: ConfigPanelStatus) -> Vec<ConfigSetting> {
         },
         ConfigSetting {
             section: ConfigSection::Appearance,
+            label: "Task list",
+            description: "Keep the latest unfinished plan above the composer between turns.",
+            keywords: "plan tasks steps progress panel",
+            value: ConfigSettingValue::Toggle {
+                setting: ConfigToggle::KeepInProgressTasksVisible,
+                enabled: ConfigToggle::KeepInProgressTasksVisible.enabled(tui),
+            },
+        },
+        ConfigSetting {
+            section: ConfigSection::Appearance,
             label: "Status line colors",
             description: "Use theme colors for the model, branch, and other status line details",
             keywords: "statusline footer colour",
