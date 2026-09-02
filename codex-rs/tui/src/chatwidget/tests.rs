@@ -307,6 +307,8 @@ mod status_surface_previews;
 mod statusline_state;
 #[path = "tests/subagent_activity_tests.rs"]
 mod subagent_activity;
+#[path = "tests/task_list_panel.rs"]
+mod task_list_panel;
 #[path = "tests/terminal_program_status.rs"]
 mod terminal_program_status;
 mod terminal_title;
