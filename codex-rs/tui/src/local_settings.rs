@@ -71,6 +71,7 @@ impl LocalSettings {
                 vim_mode_default: config.tui_vim_mode_default,
                 question_esc_back: config.tui_question_esc_back,
                 raw_output_mode: config.tui_raw_output_mode,
+                keep_in_progress_tasks_visible: config.tui_keep_in_progress_tasks_visible,
                 fullscreen_transcript: config.tui_fullscreen_transcript,
                 alternate_screen: config.tui_alternate_screen,
                 status_line: config.tui_status_line.clone(),

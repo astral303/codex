@@ -93,6 +93,29 @@ fn builder_with_edits_applies_custom_paths() {
     assert_eq!(contents, "enabled = true\n");
 }
 
+#[test]
+fn task_list_visibility_edit_persists_without_replacing_other_tui_settings() {
+    let tmp = tempdir().expect("tmpdir");
+    let codex_home = tmp.path();
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    std::fs::write(&config_path, "[tui]\nraw_output_mode = true\n").expect("write config");
+
+    for enabled in [true, false] {
+        ConfigEditsBuilder::new(codex_home)
+            .with_edits([tui_keep_in_progress_tasks_visible_edit(enabled)])
+            .apply_blocking()
+            .expect("persist task list setting");
+        let actual: TomlValue =
+            toml::from_str(&std::fs::read_to_string(&config_path).expect("read config"))
+                .expect("parse config");
+        let expected: TomlValue = toml::from_str(&format!(
+            "[tui]\nraw_output_mode = true\nkeep_in_progress_tasks_visible = {enabled}\n"
+        ))
+        .expect("parse expected config");
+        assert_eq!(actual, expected);
+    }
+}
+
 /// Toggling multi-agent v2 must preserve settings stored in its feature table.
 #[test]
 fn multi_agent_v2_feature_toggle_preserves_nested_configuration() {
