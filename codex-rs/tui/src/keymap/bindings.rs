@@ -250,6 +250,7 @@ define_runtime_action_bindings! {
         toggle_vim_mode,
         toggle_fast_mode,
         toggle_raw_output,
+        toggle_task_list,
         toggle_side_conversation,
     ],
     "chat" => Chat, chat, chat [
