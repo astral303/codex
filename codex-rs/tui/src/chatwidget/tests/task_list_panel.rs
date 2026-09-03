@@ -7,6 +7,10 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::time::Instant;
 
+/// Wraps past the two compact lines at the width these tests render, so the panel keeps offering
+/// the expand shortcut.
+const OVERFLOWING_TASK: &str = "Current work that keeps going well past the two compact lines the panel allows, so the heading still offers the expand shortcut while the panel clips the remainder with a trailing ellipsis marker";
+
 fn task(step: &str, status: StepStatus) -> PlanItemArg {
     PlanItemArg {
         step: step.to_string(),
@@ -221,7 +225,7 @@ async fn task_list_toggle_changes_only_the_visible_panel_presentation() {
     chat.on_plan_update(update(
         /*explanation*/ None,
         vec![
-            task("Current work", StepStatus::InProgress),
+            task(OVERFLOWING_TASK, StepStatus::InProgress),
             task("Next work", StepStatus::Pending),
         ],
     ));
@@ -270,7 +274,7 @@ async fn committed_keymap_edits_refresh_or_remove_the_panel_hint() {
     let (mut chat, _event_rx, _op_rx) = running_chat().await;
     chat.on_plan_update(update(
         /*explanation*/ None,
-        vec![task("Current work", StepStatus::InProgress)],
+        vec![task(OVERFLOWING_TASK, StepStatus::InProgress)],
     ));
 
     let keymap = task_keymap("\"f12\"");
