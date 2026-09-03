@@ -755,6 +755,9 @@ pub struct Config {
     /// Start the TUI in raw scrollback mode for copy-friendly transcript output.
     pub tui_raw_output_mode: bool,
 
+    /// Keep the latest structured task list visible above the composer.
+    pub tui_keep_in_progress_tasks_visible: bool,
+
     /// Start the TUI in the specified collaboration mode (plan/default).
 
     /// Controls whether the TUI uses the terminal's alternate screen buffer.
@@ -4346,6 +4349,11 @@ impl Config {
                 .tui
                 .as_ref()
                 .map(|t| t.raw_output_mode)
+                .unwrap_or(false),
+            tui_keep_in_progress_tasks_visible: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.keep_in_progress_tasks_visible)
                 .unwrap_or(false),
             tui_alternate_screen: cfg
                 .tui

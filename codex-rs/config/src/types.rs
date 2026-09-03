@@ -757,6 +757,11 @@ pub struct Tui {
     #[serde(default)]
     pub raw_output_mode: bool,
 
+    /// Keep the latest structured task list visible above the composer.
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub keep_in_progress_tasks_visible: bool,
+
     /// Controls whether the TUI uses the terminal's alternate screen buffer.
     ///
     /// - `auto` (default): Use alternate screen.
