@@ -98,6 +98,8 @@ pub(crate) struct AppKeymap {
     pub(crate) toggle_fast_mode: Vec<KeyBinding>,
     /// Toggle raw scrollback mode for copy-friendly transcript selection.
     pub(crate) toggle_raw_output: Vec<KeyBinding>,
+    /// Expand or collapse the persistent task list.
+    pub(crate) toggle_task_list: Vec<KeyBinding>,
     /// Switch between a side conversation and its parent without closing either.
     pub(crate) toggle_side_conversation: Vec<KeyBinding>,
 }
@@ -616,6 +618,13 @@ impl RuntimeKeymap {
     pub(crate) fn from_config(keymap: &TuiKeymap) -> Result<Self, String> {
         let defaults = Self::built_in_defaults();
         let chords = Arc::new(RuntimeChordKeymap::from_config(keymap)?);
+        let task_list_default_is_shadowed = keymap.global.toggle_task_list.is_none()
+            && defaults.app.toggle_task_list.iter().any(|binding| {
+                configured_main_surface_binding_is_used(keymap, *binding)
+                    || configured_context_binding_is_used(&keymap.list, *binding)
+                    || configured_context_binding_is_used(&keymap.approval, *binding)
+                    || configured_chord_prefix_is_used(&chords, KeymapContext::Global, *binding)
+            });
         let side_toggle_default_is_shadowed = keymap.global.toggle_side_conversation.is_none()
             && ["ctrl-/", "ctrl-7"].into_iter().any(|alias| {
                 configured_main_surface_alias_is_used(keymap, alias)
@@ -673,6 +682,15 @@ impl RuntimeKeymap {
                 &defaults.app.toggle_raw_output,
                 "tui.keymap.global.toggle_raw_output",
             )?,
+            toggle_task_list: if task_list_default_is_shadowed {
+                Vec::new()
+            } else {
+                resolve_bindings(
+                    keymap.global.toggle_task_list.as_ref(),
+                    &defaults.app.toggle_task_list,
+                    "tui.keymap.global.toggle_task_list",
+                )?
+            },
             toggle_side_conversation: if side_toggle_default_is_shadowed {
                 Vec::new()
             } else {
@@ -1289,6 +1307,10 @@ impl RuntimeKeymap {
                 app.toggle_raw_output.as_slice(),
             ),
             (
+                keymap.global.toggle_task_list.as_ref(),
+                app.toggle_task_list.as_slice(),
+            ),
+            (
                 keymap.global.toggle_side_conversation.as_ref(),
                 app.toggle_side_conversation.as_slice(),
             ),
@@ -1471,6 +1493,7 @@ impl RuntimeKeymap {
                 toggle_vim_mode: default_bindings![],
                 toggle_fast_mode: default_bindings![],
                 toggle_raw_output: default_bindings![alt(KeyCode::Char('r'))],
+                toggle_task_list: default_bindings![alt(KeyCode::Char('p'))],
                 toggle_side_conversation: default_bindings![ctrl(KeyCode::Char('/'))],
             },
             chords: Arc::default(),
@@ -1814,6 +1837,7 @@ impl RuntimeKeymap {
             ("toggle_vim_mode", self.app.toggle_vim_mode.as_slice()),
             ("toggle_fast_mode", self.app.toggle_fast_mode.as_slice()),
             ("toggle_raw_output", self.app.toggle_raw_output.as_slice()),
+            ("toggle_task_list", self.app.toggle_task_list.as_slice()),
             ("toggle_side_conversation", side_toggle_bindings.as_slice()),
             ("chat.interrupt_turn", self.chat.interrupt_turn.as_slice()),
             (
@@ -1909,6 +1933,7 @@ impl RuntimeKeymap {
                 ("toggle_vim_mode", self.app.toggle_vim_mode.as_slice()),
                 ("toggle_fast_mode", self.app.toggle_fast_mode.as_slice()),
                 ("toggle_raw_output", self.app.toggle_raw_output.as_slice()),
+                ("toggle_task_list", self.app.toggle_task_list.as_slice()),
                 ("toggle_side_conversation", side_toggle_bindings.as_slice()),
             ],
             approval_overlay_bindings,
@@ -1965,6 +1990,7 @@ impl RuntimeKeymap {
                 ("toggle_vim_mode", self.app.toggle_vim_mode.as_slice()),
                 ("toggle_fast_mode", self.app.toggle_fast_mode.as_slice()),
                 ("toggle_raw_output", self.app.toggle_raw_output.as_slice()),
+                ("toggle_task_list", self.app.toggle_task_list.as_slice()),
                 ("toggle_side_conversation", side_toggle_bindings.as_slice()),
                 (
                     "composer.history_search_previous",
@@ -2304,6 +2330,10 @@ fn configured_bindings_to_preserve<const N: usize>(
 
 fn configured_main_surface_binding_is_used(keymap: &TuiKeymap, binding: KeyBinding) -> bool {
     configured_main_surface_contains(keymap, |value| parse_keybinding(value) == Some(binding))
+}
+
+fn configured_context_binding_is_used(context: &impl Serialize, binding: KeyBinding) -> bool {
+    configured_context_contains(context, |value| parse_keybinding(value) == Some(binding))
 }
 
 fn configured_chord_prefix_is_used(
@@ -3748,6 +3778,79 @@ mod tests {
         assert_eq!(
             runtime.app.toggle_raw_output,
             vec![key_hint::plain(KeyCode::F(12))]
+        );
+    }
+
+    #[test]
+    fn task_list_toggle_defaults_to_alt_p_and_can_be_remapped_or_unbound() {
+        let runtime = RuntimeKeymap::defaults();
+        assert_eq!(
+            runtime.app.toggle_task_list,
+            vec![key_hint::alt(KeyCode::Char('p'))]
+        );
+
+        let mut keymap = TuiKeymap::default();
+        keymap.global.toggle_task_list = Some(one("f12"));
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("remapped keymap should parse");
+        assert_eq!(
+            runtime.app.toggle_task_list,
+            vec![key_hint::plain(KeyCode::F(12))]
+        );
+
+        keymap.global.toggle_task_list = Some(KeybindingsSpec::Many(Vec::new()));
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("unbound keymap should parse");
+        assert!(runtime.app.toggle_task_list.is_empty());
+    }
+
+    #[test]
+    fn task_list_toggle_rejects_global_binding_conflicts() {
+        let mut keymap = TuiKeymap::default();
+        keymap.global.toggle_task_list = Some(one("alt-r"));
+
+        expect_conflict(&keymap, "toggle_raw_output", "toggle_task_list");
+    }
+
+    #[test]
+    fn task_list_default_yields_to_existing_explicit_bindings() {
+        let mut keymap = TuiKeymap::default();
+        keymap.global.copy = Some(one("alt-p"));
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("legacy global binding");
+        assert_eq!(runtime.app.copy, vec![key_hint::alt(KeyCode::Char('p'))]);
+        assert!(runtime.app.toggle_task_list.is_empty());
+
+        keymap.global.copy = None;
+        keymap.list.move_down = Some(one("alt-p"));
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("legacy list binding");
+        assert_eq!(
+            runtime.list.move_down,
+            vec![key_hint::alt(KeyCode::Char('p'))]
+        );
+        assert!(runtime.app.toggle_task_list.is_empty());
+
+        keymap.list.move_down = None;
+        keymap.approval.approve = Some(one("alt-p"));
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("legacy approval binding");
+        assert_eq!(
+            runtime.approval.approve,
+            vec![key_hint::alt(KeyCode::Char('p'))]
+        );
+        assert!(runtime.app.toggle_task_list.is_empty());
+    }
+
+    #[test]
+    fn task_list_default_yields_to_existing_chord_prefix() {
+        let mut keymap = TuiKeymap::default();
+        keymap.global.copy = Some(one("alt-p f12"));
+
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("legacy chord prefix");
+
+        assert!(runtime.app.toggle_task_list.is_empty());
+        assert!(
+            runtime
+                .chords
+                .bindings
+                .iter()
+                .any(|binding| binding.chord.prefix == key_hint::alt(KeyCode::Char('p')))
         );
     }
 

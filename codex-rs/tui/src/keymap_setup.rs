@@ -1153,6 +1153,24 @@ mod tests {
     }
 
     #[test]
+    fn picker_task_list_toggle_render_snapshot() {
+        let runtime = RuntimeKeymap::defaults();
+        let params = build_keymap_picker_params_for_selected_action(
+            &runtime,
+            &TuiKeymap::default(),
+            "global",
+            "toggle_task_list",
+        );
+        let rendered = render_picker(params, /*width*/ 120);
+        let task_list_row = rendered
+            .lines()
+            .find(|line| line.contains("Toggle Task List"))
+            .expect("task-list toggle row should render");
+
+        assert_snapshot!("keymap_picker_task_list_toggle", task_list_row);
+    }
+
+    #[test]
     fn picker_all_tab_items_remain_searchable() {
         let runtime = RuntimeKeymap::defaults();
         let params = build_keymap_picker_params(&runtime, &TuiKeymap::default());
