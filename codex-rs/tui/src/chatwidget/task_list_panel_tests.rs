@@ -9,11 +9,21 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
+/// Needs more than two wrapped lines at the widths the panel tests render.
+const CLIPPED_TASK: &str = "A task whose text runs long enough to need more than the two lines the compact panel allows before it clips";
+
 fn task(step: usize, status: StepStatus) -> PlanItemArg {
     PlanItemArg {
         step: format!("Task {step}"),
         status,
     }
+}
+
+fn clipped_task_panel() -> TaskListPanel {
+    visible_panel(vec![PlanItemArg {
+        step: CLIPPED_TASK.to_string(),
+        status: StepStatus::InProgress,
+    }])
 }
 
 fn plan(statuses: Vec<StepStatus>) -> Vec<PlanItemArg> {
@@ -459,6 +469,75 @@ fn compact_panel_uses_the_combined_gutter_when_only_one_task_fits() {
         render_panel(
             &panel, /*width*/ 32, /*height*/ 2, /*right_reserved_cols*/ 0
         )
+    );
+}
+
+#[test]
+fn compact_panel_wraps_a_task_to_two_lines_and_clips_the_remainder() {
+    let panel = clipped_task_panel();
+
+    let rendered = render_panel(
+        &panel, /*width*/ 40, /*height*/ 6, /*right_reserved_cols*/ 0,
+    );
+    let task_lines = rendered
+        .lines()
+        .skip(1)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+
+    assert_eq!(task_lines.len(), COMPACT_TASK_LINE_LIMIT, "{rendered}");
+    assert!(task_lines[1].ends_with('…'), "{rendered}");
+}
+
+#[test]
+fn heading_omits_the_shortcut_when_every_task_fits() {
+    let panel = visible_panel(plan(vec![StepStatus::InProgress, StepStatus::Pending]));
+
+    let rendered = render_panel(
+        &panel, /*width*/ 40, /*height*/ 3, /*right_reserved_cols*/ 0,
+    );
+
+    assert_eq!(rendered.lines().next(), Some("Tasks 0/2"));
+}
+
+#[test]
+fn heading_offers_the_shortcut_when_a_task_is_clipped() {
+    let panel = clipped_task_panel();
+
+    let rendered = render_panel(
+        &panel, /*width*/ 40, /*height*/ 6, /*right_reserved_cols*/ 0,
+    );
+
+    assert!(
+        rendered
+            .lines()
+            .next()
+            .is_some_and(|heading| heading.ends_with("expand")),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn heading_offers_the_shortcut_when_tasks_are_hidden() {
+    let panel = visible_panel(plan(vec![
+        StepStatus::Completed,
+        StepStatus::Completed,
+        StepStatus::InProgress,
+        StepStatus::Pending,
+        StepStatus::Pending,
+        StepStatus::Pending,
+    ]));
+
+    let rendered = render_panel(
+        &panel, /*width*/ 40, /*height*/ 6, /*right_reserved_cols*/ 0,
+    );
+
+    assert!(
+        rendered
+            .lines()
+            .next()
+            .is_some_and(|heading| heading.ends_with("expand")),
+        "{rendered}"
     );
 }
 
