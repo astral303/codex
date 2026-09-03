@@ -101,6 +101,7 @@ impl ChatWidget {
             ),
             ConfigToggle::AutomaticRecaps
             | ConfigToggle::CopyOnSelectClearSelection
+            | ConfigToggle::KeepInProgressTasksVisible
             | ConfigToggle::Notifications
             | ConfigToggle::StartInVimMode
             | ConfigToggle::StatusLineColors
@@ -144,6 +145,7 @@ impl ChatWidget {
                 }
                 ConfigToggle::AutomaticRecaps
                 | ConfigToggle::CopyOnSelectClearSelection
+                | ConfigToggle::KeepInProgressTasksVisible
                 | ConfigToggle::Notifications
                 | ConfigToggle::PasteDetection
                 | ConfigToggle::StartInVimMode
