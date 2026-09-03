@@ -804,6 +804,9 @@ pub struct Config {
     /// Right-click text paste fallback for the fullscreen TUI.
     pub tui_right_click_paste: codex_config::types::RightClickPaste,
 
+    /// Keep the latest structured task list visible above the composer.
+    pub tui_keep_in_progress_tasks_visible: bool,
+
     /// Start the TUI in the specified collaboration mode (plan/default).
 
     /// Controls whether the TUI uses the terminal's alternate screen buffer.
@@ -4515,6 +4518,11 @@ impl Config {
                 .tui
                 .as_ref()
                 .map(|t| t.raw_output_mode)
+                .unwrap_or(false),
+            tui_keep_in_progress_tasks_visible: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.keep_in_progress_tasks_visible)
                 .unwrap_or(false),
             tui_fullscreen_transcript: cfg
                 .tui

@@ -1271,6 +1271,7 @@ fn config_toml_deserializes_model_availability_nux() {
             fullscreen_transcript: true,
             copy_on_select: Default::default(),
             right_click_paste: Default::default(),
+            keep_in_progress_tasks_visible: false,
             alternate_screen: AltScreenMode::default(),
             status_line: None,
             status_line_use_colors: true,
@@ -1404,6 +1405,25 @@ async fn tui_auto_recap_defaults_and_cli_overrides() -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+#[tokio::test]
+async fn runtime_config_uses_tui_keep_in_progress_tasks_visible() {
+    let toml = r#"
+        [tui]
+        keep_in_progress_tasks_visible = true
+    "#;
+    let cfg_toml: ConfigToml =
+        toml::from_str(toml).expect("deserialize keep_in_progress_tasks_visible=true");
+    let cfg = Config::load_from_base_config_with_overrides(
+        cfg_toml,
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load config");
+
+    assert!(cfg.tui_keep_in_progress_tasks_visible);
 }
 
 #[test]
@@ -4412,6 +4432,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             fullscreen_transcript: true,
             copy_on_select: Default::default(),
             right_click_paste: Default::default(),
+            keep_in_progress_tasks_visible: false,
             alternate_screen: AltScreenMode::Auto,
             status_line: None,
             status_line_use_colors: true,

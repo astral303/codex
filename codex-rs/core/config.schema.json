@@ -4431,6 +4431,11 @@
           "description": "Own the fullscreen transcript, including scrolling, selection, and search. Defaults to `true`; alternate-screen restrictions take precedence.",
           "type": "boolean"
         },
+        "keep_in_progress_tasks_visible": {
+          "default": false,
+          "description": "Keep the latest structured task list visible above the composer. Defaults to `false`.",
+          "type": "boolean"
+        },
         "keymap": {
           "allOf": [
             {
@@ -4514,6 +4519,7 @@
               "toggle_raw_output": null,
               "toggle_shortcuts": null,
               "toggle_side_conversation": null,
+              "toggle_task_list": null,
               "toggle_vim_mode": null
             },
             "list": {
@@ -5373,6 +5379,14 @@
           ],
           "description": "Switch between a side conversation and its parent without closing either."
         },
+        "toggle_task_list": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Expand or collapse the persistent task list."
+        },
         "toggle_vim_mode": {
           "allOf": [
             {
@@ -5505,6 +5519,7 @@
             "toggle_raw_output": null,
             "toggle_shortcuts": null,
             "toggle_side_conversation": null,
+            "toggle_task_list": null,
             "toggle_vim_mode": null
           }
         },
