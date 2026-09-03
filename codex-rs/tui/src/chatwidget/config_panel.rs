@@ -115,6 +115,7 @@ impl ChatWidget {
             ConfigToggle::AutomaticRecaps
             | ConfigToggle::CollapseTurnDetails
             | ConfigToggle::CopyOnSelectClearSelection
+            | ConfigToggle::KeepInProgressTasksVisible
             | ConfigToggle::Notifications
             | ConfigToggle::StartInVimMode
             | ConfigToggle::Tips => {}
@@ -158,6 +159,7 @@ impl ChatWidget {
                 ConfigToggle::AutomaticRecaps
                 | ConfigToggle::CollapseTurnDetails
                 | ConfigToggle::CopyOnSelectClearSelection
+                | ConfigToggle::KeepInProgressTasksVisible
                 | ConfigToggle::Notifications
                 | ConfigToggle::PasteDetection
                 | ConfigToggle::StartInVimMode
