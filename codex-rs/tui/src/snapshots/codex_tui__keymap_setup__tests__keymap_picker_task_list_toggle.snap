@@ -1,0 +1,5 @@
+---
+source: tui/src/keymap_setup.rs
+expression: task_list_row
+---
+› Global         Toggle Task List           alt-p
