@@ -130,6 +130,17 @@ pub fn status_line_use_colors_edit(enabled: bool) -> ConfigEdit {
     }
 }
 
+/// Produces a config edit that sets `[tui].keep_in_progress_tasks_visible`.
+pub fn tui_keep_in_progress_tasks_visible_edit(enabled: bool) -> ConfigEdit {
+    ConfigEdit::SetPath {
+        segments: vec![
+            "tui".to_string(),
+            "keep_in_progress_tasks_visible".to_string(),
+        ],
+        value: value(enabled),
+    }
+}
+
 /// Produces a config edit that sets `[tui].terminal_title` to an explicit ordered list.
 ///
 /// The array is written even when it is empty so "disabled title updates" stays
