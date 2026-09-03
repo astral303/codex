@@ -2,6 +2,6 @@
 source: tui/src/chatwidget/task_list_panel_tests.rs
 expression: "render_panel(&panel, 40, 3, 0)"
 ---
-Tasks 2/2 · ⌥ + p expand
+Tasks 2/2
    ✔ Task 0
    ✔ Task 1
