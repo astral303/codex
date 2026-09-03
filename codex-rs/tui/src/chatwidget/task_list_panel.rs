@@ -21,7 +21,8 @@ use crate::text_formatting::truncate_text;
 use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_line;
 
-pub(crate) const DEFAULT_COMPACT_TASK_ROWS: usize = 5;
+const DEFAULT_COMPACT_TASK_ROWS: usize = 5;
+const COMPACT_TASK_LINE_LIMIT: usize = 2;
 
 const MAX_TASK_LIST_ENTRIES: usize = 100;
 const MAX_TASK_STEP_GRAPHEMES: usize = 300;
@@ -37,6 +38,24 @@ const EMPTY_GUTTER: &str = "   ";
 enum TaskListPresentation {
     Compact,
     Expanded,
+}
+
+impl TaskListPresentation {
+    /// `None` when a task may wrap to as many lines as its text needs.
+    fn task_line_limit(self) -> Option<usize> {
+        match self {
+            Self::Compact => Some(COMPACT_TASK_LINE_LIMIT),
+            Self::Expanded => None,
+        }
+    }
+
+    /// Rows the presentation gives the task list, before the available height narrows it further.
+    fn max_task_rows(self) -> usize {
+        match self {
+            Self::Compact => DEFAULT_COMPACT_TASK_ROWS,
+            Self::Expanded => usize::MAX,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,14 +195,8 @@ impl TaskListPanel {
             return 0;
         }
 
-        let task_rows = match self.presentation {
-            TaskListPresentation::Compact => plan.items.len().min(DEFAULT_COMPACT_TASK_ROWS),
-            TaskListPresentation::Expanded => plan
-                .items
-                .iter()
-                .map(|item| expanded_task_lines(item, EMPTY_GUTTER, width).len())
-                .sum(),
-        };
+        let window = select_fitting_task_window(&plan.items, usize::MAX, width, self.presentation);
+        let task_rows = rendered_row_count(&plan.items, window, width, self.presentation);
         u16::try_from(task_rows.saturating_add(1)).unwrap_or(u16::MAX)
     }
 
@@ -196,32 +209,27 @@ impl TaskListPanel {
         }
 
         let task_row_capacity = usize::from(height.saturating_sub(1));
-        let window = match self.presentation {
-            TaskListPresentation::Compact => select_task_window(
-                &plan.items,
-                task_row_capacity.min(DEFAULT_COMPACT_TASK_ROWS),
-            ),
-            TaskListPresentation::Expanded => {
-                select_expanded_task_window(&plan.items, task_row_capacity, width)
-            }
-        };
+        let window =
+            select_fitting_task_window(&plan.items, task_row_capacity, width, self.presentation);
         let source_window = plan.source_window(window);
         let hidden_count = source_window.hidden_count(plan.total_items);
         let mut lines = vec![self.heading(plan, hidden_count, width)];
 
+        let presentation_line_limit = self.presentation.task_line_limit().unwrap_or(usize::MAX);
         for index in window.start..window.end {
+            let remaining_rows = task_row_capacity.saturating_sub(lines.len().saturating_sub(1));
+            if remaining_rows == 0 {
+                break;
+            }
             let source_index = plan.source_start.saturating_add(index);
             let gutter = continuation_gutter(source_window, source_index, plan.total_items);
-            match self.presentation {
-                TaskListPresentation::Compact => {
-                    lines.push(compact_task_line(&plan.items[index], gutter, width));
-                }
-                TaskListPresentation::Expanded => {
-                    lines.extend(expanded_task_lines(&plan.items[index], gutter, width));
-                }
-            }
+            lines.extend(task_lines(
+                &plan.items[index],
+                gutter,
+                width,
+                Some(presentation_line_limit.min(remaining_rows)),
+            ));
         }
-        lines.truncate(usize::from(height));
         lines
     }
 
@@ -234,7 +242,10 @@ impl TaskListPanel {
             spans.push(format!(" · {hidden_count} hidden").dim());
         }
         let mut heading: Line<'static> = spans.into();
-        if let Some(shortcut_hint) = self.shortcut_hint {
+        if let Some(shortcut_hint) = self
+            .shortcut_hint
+            .filter(|_| self.shortcut_reveals_more(plan, hidden_count, width))
+        {
             let action = match self.presentation {
                 TaskListPresentation::Compact => "expand",
                 TaskListPresentation::Expanded => "collapse",
@@ -245,6 +256,23 @@ impl TaskListPanel {
             }
         }
         truncate_line_with_ellipsis_if_overflow(heading, usize::from(width))
+    }
+
+    /// True when the shortcut would show content the current presentation withholds.
+    ///
+    /// The expanded presentation always has the compact one to return to, while the compact
+    /// presentation withholds content only when it hides tasks or clips task text.
+    fn shortcut_reveals_more(&self, plan: &DisplayPlan, hidden_count: usize, width: u16) -> bool {
+        match self.presentation {
+            TaskListPresentation::Expanded => true,
+            TaskListPresentation::Compact => {
+                hidden_count > 0
+                    || plan
+                        .items
+                        .iter()
+                        .any(|item| task_exceeds_compact_lines(item, width))
+            }
+        }
     }
 }
 
@@ -338,22 +366,43 @@ fn select_task_window(plan: &[PlanItemArg], capacity: usize) -> TaskWindow {
     TaskWindow { start, end }
 }
 
-fn select_expanded_task_window(
+/// Drop tasks from the window until the wrapped rows fit the available height.
+fn select_fitting_task_window(
     plan: &[PlanItemArg],
     row_capacity: usize,
     width: u16,
+    presentation: TaskListPresentation,
 ) -> TaskWindow {
+    let row_capacity = row_capacity.min(presentation.max_task_rows());
     let mut task_capacity = row_capacity.min(plan.len());
     loop {
         let window = select_task_window(plan, task_capacity);
-        let rendered_rows = (window.start..window.end)
-            .map(|index| expanded_task_lines(&plan[index], EMPTY_GUTTER, width).len())
-            .sum::<usize>();
-        if rendered_rows <= row_capacity || task_capacity <= 1 {
+        if rendered_row_count(plan, window, width, presentation) <= row_capacity
+            || task_capacity <= 1
+        {
             return window;
         }
         task_capacity -= 1;
     }
+}
+
+fn rendered_row_count(
+    plan: &[PlanItemArg],
+    window: TaskWindow,
+    width: u16,
+    presentation: TaskListPresentation,
+) -> usize {
+    (window.start..window.end)
+        .map(|index| {
+            task_lines(
+                &plan[index],
+                EMPTY_GUTTER,
+                width,
+                presentation.task_line_limit(),
+            )
+            .len()
+        })
+        .sum()
 }
 
 fn continuation_gutter(window: TaskWindow, index: usize, total: usize) -> &'static str {
@@ -370,20 +419,13 @@ fn continuation_gutter(window: TaskWindow, index: usize, total: usize) -> &'stat
     }
 }
 
-fn compact_task_line(item: &PlanItemArg, gutter: &str, width: u16) -> Line<'static> {
-    let (marker, step_style) = task_marker_and_step_style(&item.status);
-    truncate_line_with_ellipsis_if_overflow(
-        vec![
-            gutter.to_string().dim(),
-            marker,
-            item.step.clone().set_style(step_style),
-        ]
-        .into(),
-        usize::from(width),
-    )
-}
-
-fn expanded_task_lines(item: &PlanItemArg, gutter: &str, width: u16) -> Vec<Line<'static>> {
+/// Wrap one task under its marker, clipping to `line_limit` lines when the presentation caps them.
+fn task_lines(
+    item: &PlanItemArg,
+    gutter: &str,
+    width: u16,
+    line_limit: Option<usize>,
+) -> Vec<Line<'static>> {
     let (marker, step_style) = task_marker_and_step_style(&item.status);
     let prefix = Line::from(vec![gutter.to_string().dim(), marker]);
     let continuation = Line::from(" ".repeat(TASK_PREFIX_WIDTH));
@@ -396,7 +438,26 @@ fn expanded_task_lines(item: &PlanItemArg, gutter: &str, width: u16) -> Vec<Line
     );
     let mut lines = Vec::new();
     push_owned_lines(&wrapped, &mut lines);
+
+    let Some(line_limit) = line_limit.filter(|limit| lines.len() > *limit) else {
+        return lines;
+    };
+    lines.truncate(line_limit);
+    if let Some(last_line) = lines.pop() {
+        lines.push(mark_clipped(last_line, width));
+    }
     lines
+}
+
+fn task_exceeds_compact_lines(item: &PlanItemArg, width: u16) -> bool {
+    task_lines(item, EMPTY_GUTTER, width, None).len() > COMPACT_TASK_LINE_LIMIT
+}
+
+fn mark_clipped(line: Line<'static>, width: u16) -> Line<'static> {
+    let ellipsis_style = line.spans.last().map(|span| span.style).unwrap_or_default();
+    let mut line = line;
+    line.spans.push(Span::styled("…", ellipsis_style));
+    truncate_line_with_ellipsis_if_overflow(line, usize::from(width))
 }
 
 fn task_marker_and_step_style(status: &StepStatus) -> (Span<'static>, Style) {

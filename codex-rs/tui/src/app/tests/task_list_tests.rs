@@ -28,6 +28,10 @@ use ratatui::layout::Rect;
 use tempfile::tempdir;
 use toml::Value as TomlValue;
 
+/// Wraps past the two compact lines at the width these tests render, so the panel keeps offering
+/// the expand shortcut.
+const OVERFLOWING_TASK: &str = "Routed task that keeps going well past the two compact lines the panel allows, so the heading still offers the expand shortcut while the panel clips the remainder with a trailing ellipsis marker";
+
 fn plan_update(step: &str) -> ServerNotification {
     ServerNotification::TurnPlanUpdated(TurnPlanUpdatedNotification {
         thread_id: "thread-1".to_string(),
@@ -179,7 +183,7 @@ async fn task_list_shortcut_routes_default_remapped_unbound_and_modal_states() -
     app.chat_widget
         .set_keep_in_progress_tasks_visible(/*enabled*/ true);
     app.chat_widget
-        .handle_server_notification(plan_update("Routed task"), /*replay_kind*/ None);
+        .handle_server_notification(plan_update(OVERFLOWING_TASK), /*replay_kind*/ None);
     app.chat_widget.insert_str("keep this draft");
     let draft = app.chat_widget.composer_text_with_pending();
     let mut app_server = start_config_write_test_app_server(&app).await?;
