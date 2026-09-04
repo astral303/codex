@@ -8,7 +8,7 @@ expression: buffer_text(&modal)
   Configure the task list shown above the prompt.
 
   Type to search
-  >
-› [x] Keep in-progress tasks visible  Pin the latest unfinished plan above th…
 
-  Press space to toggle; enter to confirm and close; esc to close
+› [x] Keep in-progress tasks visible  Pin the latest unfinished plan above the …
+
+  space toggle · enter save · esc cancel
