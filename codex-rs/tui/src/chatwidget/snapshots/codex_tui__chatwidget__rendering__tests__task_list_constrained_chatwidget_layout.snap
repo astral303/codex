@@ -3,14 +3,13 @@ source: tui/src/chatwidget/rendering_tests.rs
 expression: rendered
 ---
 
-frame 1 row 0
 frame 1 row 1
 frame 1 row 2
 frame 1 row 3
 
 • Working (0s • esc to interrupt)
 
-Tasks 1/6 · 1 hidden · ⌥ + p expand
+Tasks 1/6 · 1 hidden · ⌥p expand
    ✔ Completed task
    □ Current task
    □ Pending task one
@@ -19,4 +18,5 @@ Tasks 1/6 · 1 hidden · ⌥ + p expand
 
 › continue work
 
-  tab to queue message       100% context left
+  GPT-5.6-Sol default · /tmp/project
+  tab to queue message
