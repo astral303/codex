@@ -12,6 +12,7 @@ expression: "render(&panel, 50)"
 › Theme                   Automatic ›
   Effects                 Configure ›
   Tips                    [ ] Off
+  Task list               [ ] Off
   Status line colors      [ ] Off
   Status line display     Configure ›
   Terminal title display  Configure ›
