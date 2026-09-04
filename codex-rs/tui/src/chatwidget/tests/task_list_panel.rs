@@ -44,11 +44,13 @@ async fn running_chat() -> (
 #[tokio::test]
 async fn constructor_honors_enabled_task_list_config() {
     let (event_tx, _event_rx) = unbounded_channel::<AppEvent>();
-    let mut config = test_config().await;
+    let (_codex_home, mut config) = test_config().await;
     config.tui_keep_in_progress_tasks_visible = true;
     let resolved_model = get_model_offline_for_tests(config.model.as_deref());
     let session_telemetry = test_session_telemetry(&config, resolved_model.as_str());
     let init = ChatWidgetInit {
+        requires_openai_auth: config.model_provider.requires_openai_auth,
+        local_settings: crate::local_settings::LocalSettings::from(&config),
         config: config.clone(),
         frame_requester: FrameRequester::test_dummy(),
         app_event_tx: AppEventSender::new(event_tx),
@@ -61,7 +63,6 @@ async fn constructor_honors_enabled_task_list_config() {
         feedback: codex_feedback::CodexFeedback::new(),
         is_first_run: true,
         status_account_display: None,
-        runtime_model_provider_base_url: None,
         initial_plan_type: None,
         model: Some(resolved_model),
         startup_tooltip_override: None,
