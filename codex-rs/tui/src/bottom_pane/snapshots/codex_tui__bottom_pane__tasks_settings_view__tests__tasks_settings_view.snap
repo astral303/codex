@@ -7,7 +7,7 @@ expression: "render_view(&view, 100)"
   Configure the task list shown above the prompt.
 
   Type to search
-  >
+
 › [ ] Keep in-progress tasks visible  Pin the latest unfinished plan above the prompt.
 
-  Press space to toggle; enter to confirm and close; esc to close
+  space toggle · enter save · esc cancel
