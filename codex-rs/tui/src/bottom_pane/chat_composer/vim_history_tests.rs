@@ -45,6 +45,13 @@ fn ctrl_r(composer: &mut ChatComposer) {
     let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
 }
 
+fn configure_composer_history_keys(composer: &mut ChatComposer) {
+    let mut keymap = RuntimeKeymap::defaults();
+    keymap.composer.undo = vec![crate::key_hint::plain(KeyCode::F(2))];
+    keymap.composer.redo = vec![crate::key_hint::plain(KeyCode::F(3))];
+    composer.set_keymap_bindings(&keymap);
+}
+
 #[test]
 fn undo_and_redo_group_complete_vim_edits() {
     for (original, command, edited) in [
@@ -63,13 +70,13 @@ fn undo_and_redo_group_complete_vim_edits() {
         }
         escape(&mut composer);
         assert_eq!(composer.current_text(), edited);
-        assert_eq!(composer.vim_history.undo.len(), 1);
 
         keys(&mut composer, "u");
         assert_eq!(
             (composer.current_text(), composer.cursor()),
             (original.to_owned(), 0)
         );
+        assert!(!composer.undo_edit());
         ctrl_r(&mut composer);
         assert_eq!(composer.current_text(), edited);
     }
@@ -140,7 +147,7 @@ fn normal_mode_explicit_paste_is_its_own_edit_and_replaces_stale_redo() {
 
     composer.handle_paste("Z".to_owned());
     assert_eq!(composer.current_text(), "Zabc");
-    assert!(composer.vim_history.redo.is_empty());
+    assert_eq!(composer.undo_history.redo_depth(), 0);
     ctrl_r(&mut composer);
     assert_eq!(composer.current_text(), "Zabc");
     assert!(!composer.history_search_active());
@@ -156,7 +163,7 @@ fn normal_mode_direct_insert_and_image_attachment_are_undoable() {
     keys(&mut composer, "xu");
     composer.insert_str("Z");
     assert_eq!(composer.current_text(), "Zabc");
-    assert!(composer.vim_history.redo.is_empty());
+    assert_eq!(composer.undo_history.redo_depth(), 0);
     keys(&mut composer, "u");
     assert_eq!(composer.current_text(), "abc");
     ctrl_r(&mut composer);
@@ -167,7 +174,7 @@ fn normal_mode_direct_insert_and_image_attachment_are_undoable() {
     composer.attach_image(path.clone());
     let with_image = composer.draft_snapshot();
     assert_eq!(composer.local_image_paths(), vec![path]);
-    assert!(composer.vim_history.redo.is_empty());
+    assert_eq!(composer.undo_history.redo_depth(), 0);
     keys(&mut composer, "u");
     assert_eq!(composer.current_text(), "abc");
     assert!(composer.local_image_paths().is_empty());
@@ -189,12 +196,12 @@ fn deleting_a_selected_remote_image_is_one_undoable_vim_edit() {
         let url = "https://example.com/remote.png".to_owned();
         composer.set_remote_image_urls(vec![url.clone()]);
         keys(&mut composer, "xu");
-        assert_eq!(composer.vim_history.redo.len(), 1);
+        assert_eq!(composer.undo_history.redo_depth(), 1);
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert!(composer.vim_history.pending.is_none());
+        assert!(!composer.vim_edit_transaction.is_active());
         let _ = composer.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE));
         assert!(composer.remote_image_urls().is_empty());
-        assert!(composer.vim_history.redo.is_empty());
+        assert_eq!(composer.undo_history.redo_depth(), 0);
         keys(&mut composer, "u");
         assert_eq!(composer.remote_image_urls(), vec![url]);
         assert_eq!(composer.current_text(), "abc");
@@ -213,10 +220,10 @@ fn direct_edits_join_the_active_vim_insert_transaction() {
     keys(&mut composer, "D");
     escape(&mut composer);
     let edited = composer.draft_snapshot();
-    assert_eq!(composer.vim_history.undo.len(), 1);
     keys(&mut composer, "u");
     assert_eq!(composer.current_text(), "abc");
     assert!(composer.local_image_paths().is_empty());
+    assert!(!composer.undo_edit());
     ctrl_r(&mut composer);
     assert_eq!(composer.draft_snapshot(), edited);
 }
@@ -231,7 +238,7 @@ fn vim_search_query_paste_does_not_invalidate_draft_redo() {
         composer.draft.textarea.vim_query().unwrap().editor.text(),
         "beta"
     );
-    assert!(composer.vim_history.pending.is_none());
+    assert!(!composer.vim_edit_transaction.is_active());
 
     escape(&mut composer);
     ctrl_r(&mut composer);
@@ -261,14 +268,17 @@ fn vim_redo_keeps_its_binding_when_history_is_empty() {
         /*enhanced_keys_supported*/ true,
         |target| *target = composer,
     );
+}
 
-    let original = "a".repeat(super::MAX_VIM_UNDO_BYTES / 2 + 1);
-    let mut composer = vim_composer(&original);
+#[test]
+fn canceled_vim_commands_keep_the_committed_redo_step() {
+    let original = "alpha";
+    let mut composer = vim_composer(original);
     keys(&mut composer, "xu");
-    for command in ["d", "i"] {
-        keys(&mut composer, command);
+    for canceled_command in ["d", "i"] {
+        keys(&mut composer, canceled_command);
         escape(&mut composer);
-        assert_eq!(composer.vim_history.redo.len(), 1);
+        assert_eq!(composer.undo_history.redo_depth(), 1);
     }
     ctrl_r(&mut composer);
     assert_eq!(composer.current_text(), original[1..]);
@@ -276,9 +286,8 @@ fn vim_redo_keeps_its_binding_when_history_is_empty() {
 
     keys(&mut composer, "uiZ");
     escape(&mut composer);
-    assert!(composer.vim_history.redo.is_empty());
+    assert_eq!(composer.undo_history.redo_depth(), 0);
     keys(&mut composer, "x");
-    assert_eq!(composer.vim_history.undo.len(), 1);
     keys(&mut composer, "u");
     assert_eq!(composer.current_text(), format!("Z{original}"));
 }
@@ -435,6 +444,71 @@ fn undo_and_redo_use_configured_bindings_and_support_unbinding() {
 }
 
 #[test]
+fn vim_undo_continues_into_earlier_non_modal_edits() {
+    let (mut composer, _receiver) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    keys(&mut composer, "ab");
+    composer.set_vim_enabled(/*enabled*/ true);
+    composer.draft.textarea.set_cursor(/*pos*/ 0);
+    keys(&mut composer, "x");
+    assert_eq!(composer.current_text(), "b");
+
+    keys(&mut composer, "uuu");
+
+    assert!(composer.is_empty());
+    assert!(!composer.undo_edit());
+}
+
+#[test]
+fn composer_undo_and_redo_traverse_mixed_mode_history() {
+    let (mut composer, _receiver) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    configure_composer_history_keys(&mut composer);
+    keys(&mut composer, "a");
+    composer.set_vim_enabled(/*enabled*/ true);
+    composer.draft.textarea.set_cursor(/*pos*/ 0);
+    keys(&mut composer, "x");
+    assert!(composer.is_empty());
+
+    let _ = composer.handle_key_event(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+    assert_eq!(composer.current_text(), "a");
+    let _ = composer.handle_key_event(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+    assert!(composer.is_empty());
+    let _ = composer.handle_key_event(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+    assert_eq!(composer.current_text(), "a");
+    let _ = composer.handle_key_event(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+    assert!(composer.is_empty());
+}
+
+#[test]
+fn composer_undo_finishes_an_active_vim_insert_transaction() {
+    let mut composer = vim_composer("abc");
+    configure_composer_history_keys(&mut composer);
+    keys(&mut composer, "iXYZ");
+    assert_eq!(composer.current_text(), "XYZabc");
+
+    let _ = composer.handle_key_event(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+
+    assert_eq!(composer.current_text(), "abc");
+    assert!(composer.draft.textarea.is_vim_normal_mode());
+    assert!(!composer.undo_edit());
+}
+
+#[test]
+fn mode_switches_preserve_history_without_adding_steps() {
+    let (mut composer, _receiver) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    keys(&mut composer, "a");
+
+    composer.set_vim_enabled(/*enabled*/ true);
+    composer.set_vim_enabled(/*enabled*/ false);
+
+    assert!(composer.undo_edit());
+    assert!(composer.is_empty());
+    assert!(!composer.undo_edit());
+}
+
+#[test]
 fn undo_and_redo_restore_deleted_large_paste_payload() {
     let mut composer = vim_composer("alpha ");
     composer.draft.textarea.set_cursor("alpha ".len());
@@ -480,7 +554,7 @@ fn find_jump_and_search_navigation_never_snapshot_the_draft() {
     for key in ['f', 'F', 'G', '/', '?', 'n', 'N'] {
         composer.begin_vim_edit(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
         assert!(
-            composer.vim_history.pending.is_none(),
+            !composer.vim_edit_transaction.is_active(),
             "navigation binding {key:?} snapshotted the draft"
         );
     }
@@ -491,7 +565,7 @@ fn find_jump_and_search_navigation_never_snapshot_the_draft() {
         .expect("native jump-top chord")
         .parts();
     composer.begin_vim_edit(KeyEvent::new(code, modifiers));
-    assert!(composer.vim_history.pending.is_none());
+    assert!(!composer.vim_edit_transaction.is_active());
 
     for command in ["llwbh0$", "fb", "Fa", "G", "/beta\nnN", "?alpha\n"] {
         let text = "alpha beta\nalpha gamma";
@@ -499,10 +573,10 @@ fn find_jump_and_search_navigation_never_snapshot_the_draft() {
         for key in command.chars() {
             keys(&mut composer, &key.to_string());
             assert!(
-                composer.vim_history.pending.is_none(),
+                !composer.vim_edit_transaction.is_active(),
                 "navigation command {command:?} snapshotted the draft"
             );
-            assert!(composer.vim_history.undo.is_empty());
+            assert!(!composer.undo_edit());
         }
         assert_eq!(composer.current_text(), text);
     }
@@ -515,8 +589,8 @@ fn find_jump_and_search_navigation_never_snapshot_the_draft() {
     ctrl_r(&mut composer);
     keys(&mut composer, "alpha");
     assert_eq!(composer.current_text(), "alpha archived");
-    assert!(composer.vim_history.pending.is_none());
-    assert!(composer.vim_history.undo.is_empty());
+    assert!(!composer.vim_edit_transaction.is_active());
+    assert!(!composer.undo_edit());
     escape(&mut composer);
     assert_eq!(composer.current_text(), "alpha beta\nalpha gamma");
 }

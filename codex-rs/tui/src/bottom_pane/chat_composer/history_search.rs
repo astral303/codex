@@ -31,16 +31,16 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 
-use super::super::chat_composer_history::HistorySearchDirection;
+use super::super::chat_composer_history::HistoryDirection;
 use super::super::chat_composer_history::HistorySearchResult;
 use super::super::footer::footer_height;
 use super::super::footer::reset_mode_after_activity;
 use super::super::textarea::VimPersistentState;
 use super::ActivePopup;
 use super::ChatComposer;
-use super::ComposerDraft;
+use super::EditableDraft;
 use super::InputResult;
-use super::vim_history::VimHistory;
+use super::vim_history::VimEditTransaction;
 use crate::app_event::AppEvent;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
@@ -56,9 +56,9 @@ use crate::ui_consts::FOOTER_INDENT_COLS;
 #[derive(Debug)]
 pub(super) struct HistorySearchSession {
     /// Draft to restore when search is canceled or a query has no match.
-    original_draft: ComposerDraft,
-    /// Same-draft Vim edits to restore when a temporary preview is canceled.
-    original_vim_history: VimHistory,
+    original_draft: EditableDraft,
+    /// Active Vim edit transaction to restore when a temporary preview is canceled.
+    original_vim_edit_transaction: VimEditTransaction,
     /// Active and completed Vim commands suspended during temporary draft replacement.
     original_vim_state: VimPersistentState,
     /// Footer-owned query text typed while Ctrl+R search is active.
@@ -121,14 +121,14 @@ impl ChatComposer {
         self.popups.active = ActivePopup::None;
         self.attachments.clear_remote_image_selection();
         let original_draft = self.snapshot_draft();
-        let original_vim_history = std::mem::take(&mut self.vim_history);
+        let original_vim_edit_transaction = std::mem::take(&mut self.vim_edit_transaction);
         let mut original_vim_state = VimPersistentState::default();
         self.draft
             .textarea
             .swap_vim_persistent_state(&mut original_vim_state);
         self.history_search = Some(HistorySearchSession {
             original_draft,
-            original_vim_history,
+            original_vim_edit_transaction,
             original_vim_state,
             query: String::new(),
             status: HistorySearchStatus::Idle,
@@ -153,14 +153,14 @@ impl ChatComposer {
         if Self::is_history_search_key(&key_event, &self.history_search_previous_keys)
             || matches!(key_event.code, KeyCode::Up)
         {
-            let result = self.history_search_in_direction(HistorySearchDirection::Older);
+            let result = self.history_search_in_direction(HistoryDirection::Older);
             return (result, true);
         }
 
         if Self::is_history_search_forward_key(&key_event, &self.history_search_next_keys)
             || matches!(key_event.code, KeyCode::Down)
         {
-            let result = self.history_search_in_direction(HistorySearchDirection::Newer);
+            let result = self.history_search_in_direction(HistoryDirection::Newer);
             return (result, true);
         }
 
@@ -201,6 +201,7 @@ impl ChatComposer {
                     self.history.reset_search();
                     self.footer.mode = reset_mode_after_activity(self.footer.mode);
                     self.move_cursor_to_end();
+                    self.establish_undo_baseline();
                 }
                 (InputResult::None, true)
             }
@@ -244,7 +245,7 @@ impl ChatComposer {
         }
     }
 
-    fn history_search_in_direction(&mut self, direction: HistorySearchDirection) -> InputResult {
+    fn history_search_in_direction(&mut self, direction: HistoryDirection) -> InputResult {
         let Some((query, original_draft)) = self
             .history_search
             .as_ref()
@@ -292,7 +293,7 @@ impl ChatComposer {
         }
         let result = self.history.search(
             &query,
-            HistorySearchDirection::Older,
+            HistoryDirection::Older,
             /*restart*/ true,
             &self.app_event_tx,
         );
@@ -312,7 +313,7 @@ impl ChatComposer {
         self.history.reset_navigation();
         self.footer.mode = reset_mode_after_activity(self.footer.mode);
         self.restore_draft(search.original_draft);
-        self.vim_history = search.original_vim_history;
+        self.vim_edit_transaction = search.original_vim_edit_transaction;
         self.draft
             .textarea
             .swap_vim_persistent_state(&mut search.original_vim_state);
