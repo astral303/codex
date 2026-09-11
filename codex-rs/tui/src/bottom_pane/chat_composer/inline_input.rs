@@ -5,9 +5,9 @@ use super::*;
 impl ComposerDraft {
     pub(in crate::bottom_pane) fn text_with_pending(&self) -> String {
         ChatComposer::expand_pending_pastes(
-            &self.text,
-            self.text_elements.clone(),
-            &self.pending_pastes,
+            &self.content.text,
+            self.content.text_elements.clone(),
+            &self.content.pending_pastes,
         )
         .0
     }
@@ -28,7 +28,7 @@ impl ChatComposer {
     }
 
     pub(crate) fn reset_vim_mode(&mut self) {
-        self.vim_history = VimHistory::default();
+        self.vim_edit_transaction = VimEditTransaction::default();
         self.draft.textarea.enter_vim_insert_mode();
     }
 
