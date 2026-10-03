@@ -175,6 +175,27 @@ pub(crate) struct ComposerKeymap {
     pub(crate) history_search_previous: Vec<KeyBinding>,
     /// Move to the next match in reverse history search.
     pub(crate) history_search_next: Vec<KeyBinding>,
+    /// Undo the most recent composer draft edit.
+    pub(crate) undo: Vec<KeyBinding>,
+    /// Redo the most recently undone composer draft edit.
+    pub(crate) redo: Vec<KeyBinding>,
+}
+
+fn default_composer_undo_redo_modifiers() -> KeyModifiers {
+    if cfg!(windows) {
+        KeyModifiers::CONTROL
+    } else {
+        KeyModifiers::ALT
+    }
+}
+
+pub(crate) fn default_composer_undo_binding() -> KeyBinding {
+    KeyBinding::new(KeyCode::Char('z'), default_composer_undo_redo_modifiers())
+}
+
+pub(crate) fn default_composer_redo_binding() -> KeyBinding {
+    let modifiers = default_composer_undo_redo_modifiers() | KeyModifiers::SHIFT;
+    KeyBinding::new(KeyCode::Char('z'), modifiers)
 }
 
 /// Editor-specific keybindings used by the composer textarea.
@@ -679,6 +700,16 @@ impl RuntimeKeymap {
             })
             .collect();
 
+        let undo_default_is_shadowed = keymap.composer.undo.is_none()
+            && defaults.composer.undo.iter().any(|binding| {
+                configured_main_surface_binding_is_used(keymap, *binding)
+                    || configured_chord_prefix_is_used(&chords, KeymapContext::Composer, *binding)
+            });
+        let redo_default_is_shadowed = keymap.composer.redo.is_none()
+            && defaults.composer.redo.iter().any(|binding| {
+                configured_main_surface_binding_is_used(keymap, *binding)
+                    || configured_chord_prefix_is_used(&chords, KeymapContext::Composer, *binding)
+            });
         let app = AppKeymap {
             open_agents: resolve_bindings(
                 keymap.global.open_agents.as_ref(),
@@ -813,6 +844,16 @@ impl RuntimeKeymap {
                 history_search_previous
             ),
             history_search_next: resolve_local!(keymap, defaults, composer, history_search_next),
+            undo: if undo_default_is_shadowed {
+                Vec::new()
+            } else {
+                resolve_local!(keymap, defaults, composer, undo)
+            },
+            redo: if redo_default_is_shadowed {
+                Vec::new()
+            } else {
+                resolve_local!(keymap, defaults, composer, redo)
+            },
         };
 
         let editor = Arc::new(EditorKeymap {
@@ -1685,6 +1726,8 @@ impl RuntimeKeymap {
                 ],
                 history_search_previous: default_bindings![ctrl(KeyCode::Char('r'))],
                 history_search_next: default_bindings![ctrl(KeyCode::Char('s'))],
+                undo: vec![default_composer_undo_binding()],
+                redo: vec![default_composer_redo_binding()],
             },
             editor: Arc::new(EditorKeymap {
                 insert_newline: default_bindings![
@@ -2063,6 +2106,8 @@ impl RuntimeKeymap {
                 "composer.history_search_next",
                 self.composer.history_search_next.as_slice(),
             ),
+            ("composer.undo", self.composer.undo.as_slice()),
+            ("composer.redo", self.composer.redo.as_slice()),
         ];
         validate_unique("app", main_bindings)?;
 
@@ -2215,6 +2260,8 @@ impl RuntimeKeymap {
                     "composer.history_search_previous",
                     self.composer.history_search_previous.as_slice(),
                 ),
+                ("composer.undo", self.composer.undo.as_slice()),
+                ("composer.redo", self.composer.redo.as_slice()),
             ],
             [
                 (
@@ -2457,6 +2504,8 @@ See the Codex keymap documentation for supported actions and examples."
 }
 
 const MAIN_RESERVED_BINDINGS: &[(&str, KeyBinding)] = &[
+    #[cfg(unix)]
+    ("fixed.suspend", key_hint::ctrl(KeyCode::Char('z'))),
     (
         "fixed.interrupt_or_quit",
         key_hint::ctrl(KeyCode::Char('c')),
@@ -2554,7 +2603,23 @@ fn configured_bindings_to_preserve<const N: usize>(
     configured_bindings
 }
 
+fn configured_chord_prefix_is_used(
+    chords: &RuntimeChordKeymap,
+    context: KeymapContext,
+    binding: KeyBinding,
+) -> bool {
+    chords.bindings.iter().any(|configured| {
+        configured.action.context.overlaps(context)
+            && configured.chord.prefix.parts() == binding.parts()
+    })
+}
+
 fn configured_main_surface_alias_is_used(keymap: &TuiKeymap, alias: &str) -> bool {
+    parse_keybinding(alias)
+        .is_some_and(|binding| configured_main_surface_binding_is_used(keymap, binding))
+}
+
+fn configured_main_surface_binding_is_used(keymap: &TuiKeymap, binding: KeyBinding) -> bool {
     let mut global = keymap.global.clone();
     if keymap.composer.submit.is_some() {
         global.submit = None;
@@ -2567,15 +2632,15 @@ fn configured_main_surface_alias_is_used(keymap: &TuiKeymap, alias: &str) -> boo
     }
 
     // Reasoning shortcuts run before composer/editor key handling, so fallback
-    // aliases must yield to any explicit binding on the same main-surface input
+    // bindings must yield to any explicit binding on the same main-surface input
     // path.
-    configured_context_alias_is_used(&global, alias)
-        || configured_context_alias_is_used(&keymap.chat, alias)
-        || configured_context_alias_is_used(&keymap.composer, alias)
-        || configured_context_alias_is_used(&keymap.editor, alias)
-        || configured_context_alias_is_used(&keymap.vim_normal, alias)
-        || configured_context_alias_is_used(&keymap.vim_operator, alias)
-        || configured_context_alias_is_used(&keymap.vim_text_object, alias)
+    configured_context_binding_is_used(&global, binding)
+        || configured_context_binding_is_used(&keymap.chat, binding)
+        || configured_context_binding_is_used(&keymap.composer, binding)
+        || configured_context_binding_is_used(&keymap.editor, binding)
+        || configured_context_binding_is_used(&keymap.vim_normal, binding)
+        || configured_context_binding_is_used(&keymap.vim_operator, binding)
+        || configured_context_binding_is_used(&keymap.vim_text_object, binding)
 }
 
 fn configured_context_alias_is_used(context: &impl Serialize, alias: &str) -> bool {
@@ -2715,6 +2780,27 @@ mod tests {
 
     fn one(spec: &str) -> KeybindingsSpec {
         KeybindingsSpec::One(KeybindingSpec(spec.to_string()))
+    }
+
+    fn composer_z_binding(binding: KeyBinding) -> String {
+        let (key, modifiers) = binding.parts();
+        assert_eq!(key, KeyCode::Char('z'));
+        let primary_modifier = if modifiers.contains(KeyModifiers::CONTROL) {
+            "ctrl"
+        } else {
+            assert!(modifiers.contains(KeyModifiers::ALT));
+            "alt"
+        };
+        let shift = if modifiers.contains(KeyModifiers::SHIFT) {
+            "-shift"
+        } else {
+            ""
+        };
+        format!("{primary_modifier}{shift}-z")
+    }
+
+    fn one_composer_z_binding(binding: KeyBinding) -> KeybindingsSpec {
+        one(&composer_z_binding(binding))
     }
 
     fn expect_conflict(keymap: &TuiKeymap, first: &str, second: &str) {
@@ -2954,7 +3040,59 @@ mod tests {
             runtime.composer.history_search_next,
             vec![key_hint::ctrl(KeyCode::Char('s'))]
         );
+        let undo_redo_modifier = if cfg!(windows) {
+            KeyModifiers::CONTROL
+        } else {
+            KeyModifiers::ALT
+        };
+        assert_eq!(
+            (runtime.composer.undo, runtime.composer.redo),
+            (
+                vec![KeyBinding::new(KeyCode::Char('z'), undo_redo_modifier,)],
+                vec![KeyBinding::new(
+                    KeyCode::Char('z'),
+                    undo_redo_modifier | KeyModifiers::SHIFT,
+                )],
+            )
+        );
         assert_eq!(runtime.editor.kill_whole_line, Vec::new());
+    }
+
+    #[test]
+    fn undo_defaults_yield_to_existing_editor_bindings() {
+        let mut keymap = TuiKeymap::default();
+        keymap.editor.move_line_start =
+            Some(one_composer_z_binding(default_composer_undo_binding()));
+        keymap.editor.move_line_end = Some(one_composer_z_binding(default_composer_redo_binding()));
+
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("editor bindings should win");
+
+        assert!(runtime.composer.undo.is_empty());
+        assert!(runtime.composer.redo.is_empty());
+    }
+
+    #[test]
+    fn undo_defaults_yield_to_existing_editor_chord_prefixes() {
+        let undo = composer_z_binding(default_composer_undo_binding());
+        let redo = composer_z_binding(default_composer_redo_binding());
+        let mut keymap = TuiKeymap::default();
+        keymap.editor.move_line_start = Some(one(&format!("{undo} f10")));
+        keymap.editor.move_line_end = Some(one(&format!("{redo} f11")));
+
+        let runtime = RuntimeKeymap::from_config(&keymap).expect("editor chords should win");
+
+        assert_eq!(
+            (runtime.composer.undo, runtime.composer.redo),
+            (Vec::new(), Vec::new())
+        );
+        assert!(runtime.chords.bindings.iter().any(|binding| {
+            binding.action.context == KeymapContext::Editor
+                && binding.chord.prefix == default_composer_undo_binding()
+        }));
+        assert!(runtime.chords.bindings.iter().any(|binding| {
+            binding.action.context == KeymapContext::Editor
+                && binding.chord.prefix == default_composer_redo_binding()
+        }));
     }
 
     #[test]
@@ -3333,6 +3471,7 @@ mod tests {
                 ("vim_search", "forward", ""),
                 ("vim_search", "forward", " g"),
                 ("composer", "submit", ""),
+                ("composer", "undo", ""),
                 ("global", "submit", ""),
                 ("global", "queue", ""),
                 ("global", "toggle_shortcuts", ""),

@@ -42,6 +42,8 @@ pub(super) fn lines(props: &FooterProps, width: u16) -> Vec<Line<'static>> {
     ));
     compose.push(hints.external_editor, "External editor");
     compose.push(hints.history_search, "Search history");
+    compose.push(hints.undo, "Undo");
+    compose.push(hints.redo, "Redo");
     if let Some(key) = hints.edit_previous {
         let label = key.display_label();
         compose.entries.push(Shortcut {

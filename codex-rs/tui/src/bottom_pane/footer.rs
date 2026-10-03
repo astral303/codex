@@ -53,6 +53,8 @@ use crate::status::format_tokens_compact;
 use crate::style::secondary_text_style;
 use crate::ui_consts::FOOTER_INDENT_COLS;
 use crossterm::event::KeyCode;
+#[cfg(test)]
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Styled;
@@ -122,12 +124,15 @@ pub(crate) struct FooterKeyHints {
     pub(crate) find_transcript: Option<ShortcutHint>,
     pub(crate) focus_activity: Option<ShortcutHint>,
     pub(crate) history_search: Option<ShortcutHint>,
+    pub(crate) undo: Option<ShortcutHint>,
+    pub(crate) redo: Option<ShortcutHint>,
     pub(crate) reasoning_down: Option<ShortcutHint>,
     pub(crate) reasoning_up: Option<ShortcutHint>,
     pub(crate) toggle_voice: Option<ShortcutHint>,
 }
 
 impl FooterKeyHints {
+    /// Stable representative bindings for platform-independent rendering tests.
     #[cfg(test)]
     pub(crate) fn default_bindings() -> Self {
         Self {
@@ -141,6 +146,14 @@ impl FooterKeyHints {
             find_transcript: Some(key_hint::plain(KeyCode::F(3)).into()),
             focus_activity: Some(key_hint::plain(KeyCode::F(4)).into()),
             history_search: Some(key_hint::ctrl(KeyCode::Char('r')).into()),
+            undo: Some(key_hint::ctrl(KeyCode::Char('z')).into()),
+            redo: Some(
+                KeyBinding::new(
+                    KeyCode::Char('z'),
+                    KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+                )
+                .into(),
+            ),
             reasoning_down: Some(key_hint::alt(KeyCode::Char(',')).into()),
             reasoning_up: Some(key_hint::alt(KeyCode::Char('.')).into()),
             toggle_voice: Some(key_hint::plain(KeyCode::F(8)).into()),
