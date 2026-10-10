@@ -1632,6 +1632,7 @@ impl App {
             self.recap.reset_for_new_thread(Instant::now());
         }
         self.primary_thread_id = Some(thread_id);
+        self.bind_send_endpoint(thread_id);
         if self.local_settings.workspace_enabled(&self.config)
             && matches!(
                 presentation,
