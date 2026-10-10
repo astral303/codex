@@ -306,6 +306,7 @@ async fn new_config(
         tui_theme: None,
         tui_raw_output_mode: false,
         tui_keep_in_progress_tasks_visible: false,
+        ipc_enabled: true,
         tui_pet: None,
         tui_pet_anchor: TuiPetAnchor::Composer,
         terminal_resize_reflow: TerminalResizeReflowConfig::default(),

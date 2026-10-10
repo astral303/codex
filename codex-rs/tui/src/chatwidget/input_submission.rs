@@ -1,5 +1,6 @@
 //! User-message and shell-prompt submission behavior for `ChatWidget`.
 
+use super::input_flow::UserMessageDisposition;
 use super::*;
 use codex_app_server_protocol::ImageReference;
 use codex_utils_path_uri::LegacyAppPathString;
@@ -34,6 +35,16 @@ impl UserMessageSubmissionOutcome {
             accepted: true,
             app_command: Some(app_command),
             queue_drain: QueueDrain::Stop,
+        }
+    }
+
+    pub(super) fn disposition(&self) -> UserMessageDisposition {
+        if self.app_command.is_some() {
+            UserMessageDisposition::Submitted
+        } else if self.accepted {
+            UserMessageDisposition::Queued
+        } else {
+            UserMessageDisposition::Dropped
         }
     }
 }
