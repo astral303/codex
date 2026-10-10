@@ -102,6 +102,7 @@ members = [
     "responses-api-proxy",
     "response-debug-context",
     "sandboxing",
+    "send",
     "stdio-to-uds",
     "otel",
     "otel-trace-websocket",
@@ -276,6 +277,7 @@ codex-secrets = { path = "secrets" }
 codex-shell-command = { path = "shell-command" }
 codex-skills-extension = { path = "ext/skills" }
 codex-skills = { path = "skills" }
+codex-send = { path = "send" }
 codex-state = { path = "state" }
 codex-stdio-to-uds = { path = "stdio-to-uds" }
 codex-terminal-detection = { path = "terminal-detection" }

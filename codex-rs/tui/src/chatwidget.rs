@@ -33,6 +33,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -289,6 +290,7 @@ mod input_restore;
 mod input_submission;
 mod interrupts;
 mod questions;
+mod send_messages;
 mod startup_submission;
 use self::interrupts::InterruptManager;
 mod keymap_picker;
@@ -699,6 +701,7 @@ pub(crate) struct ChatWidget {
     // order.
     suppress_initial_user_message_submit: bool,
     input_queue: InputQueueState,
+    recent_send_responses: VecDeque<(String, codex_send::SendResponse)>,
     /// True from `pause_for_disconnect` or `pause_unavailable_thread` until input state is
     /// restored. A pending-start reservation held across the pause cannot reach `TurnStarted`,
     /// so it does not count as running work while this is set.
