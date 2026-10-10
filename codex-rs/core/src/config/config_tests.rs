@@ -1428,6 +1428,32 @@ async fn runtime_config_uses_tui_keep_in_progress_tasks_visible() {
     assert!(cfg.tui_keep_in_progress_tasks_visible);
 }
 
+#[tokio::test]
+async fn runtime_config_enables_ipc_unless_opted_out() -> anyhow::Result<()> {
+    let codex_home = tempdir()?;
+    let defaults = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    let opted_out: ConfigToml = toml::from_str(
+        r#"
+        [ipc]
+        enabled = false
+    "#,
+    )?;
+    let opted_out = Config::load_from_base_config_with_overrides(
+        opted_out,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!((defaults.ipc_enabled, opted_out.ipc_enabled), (true, false));
+    Ok(())
+}
+
 #[test]
 fn config_toml_deserializes_permission_profiles() {
     let toml = r#"
