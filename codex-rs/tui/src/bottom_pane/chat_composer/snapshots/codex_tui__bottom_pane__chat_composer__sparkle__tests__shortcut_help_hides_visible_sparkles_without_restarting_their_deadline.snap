@@ -19,9 +19,9 @@ shortcut help:
   ⌃v       Paste image          ⌃c   Quit
   ⌃g       External editor
   ⌃r       Search history       Transcript (open first)
-  esc esc  Edit last message    ⌃t            Open transcript
-                                f3            Find text
-                                pgup / pgdn   Scroll
+  ⌃z       Undo                 ⌃t            Open transcript
+  ⌃⇧z      Redo                 f3            Find text
+  esc esc  Edit last message    pgup / pgdn   Scroll
                                 ⌃space        Start selection
                                 ⌃home / ⌃end  Top / latest
                                 ⇧⌥, / ⇧⌥.     Top / latest
@@ -54,9 +54,9 @@ shortcut help:
   ⌃v       Paste image          ⌃c   Quit
   ⌃g       External editor
   ⌃r       Search history       Transcript (open first)
-  esc esc  Edit last message    ⌃t            Open transcript
-                                f3            Find text
-                                pgup / pgdn   Scroll
+  ⌃z       Undo                 ⌃t            Open transcript
+  ⌃⇧z      Redo                 f3            Find text
+  esc esc  Edit last message    pgup / pgdn   Scroll
                                 ⌃space        Start selection
                                 ⌃home / ⌃end  Top / latest
                                 ⇧⌥, / ⇧⌥.     Top / latest
