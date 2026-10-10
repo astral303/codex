@@ -848,6 +848,21 @@ impl QuickDial {
     }
 }
 
+/// Settings for the per-session socket that `codex send` delivers messages through.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
+#[serde(default)]
+#[schemars(deny_unknown_fields)]
+pub struct Ipc {
+    /// When false, running sessions do not listen for `codex send` messages.
+    pub enabled: bool,
+}
+
+impl Default for Ipc {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Collection of settings that are specific to the TUI.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]

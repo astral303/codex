@@ -1,6 +1,7 @@
 //! Construction and initial wiring for `ChatWidget`.
 
 use super::*;
+use std::collections::VecDeque;
 
 impl ChatWidget {
     pub(crate) fn new_with_app_event(common: ChatWidgetInit) -> Self {
@@ -253,6 +254,7 @@ impl ChatWidget {
             forked_from: None,
             interrupted_turn_notice_mode: InterruptedTurnNoticeMode::Default,
             input_queue: InputQueueState::default(),
+            recent_send_responses: VecDeque::new(),
             input_paused: false,
             safety_buffering_prompt: None,
             safety_buffering_source: UserMessageSource::Prompt,

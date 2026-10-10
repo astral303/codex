@@ -11,6 +11,17 @@ use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
 
+/// Result of `submit_or_queue_user_message`: submitted now, queued, or dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum UserMessageDisposition {
+    /// Entered the turn pipeline, as a new turn or a steer of the running one.
+    Submitted,
+    /// Held in the local follow-up queue until the session can take input.
+    Queued,
+    /// Refused because a misalignment policy violation is blocking input.
+    Dropped,
+}
+
 impl ChatWidget {
     pub(crate) fn set_parent_owned_thread(&mut self) {
         self.cancel_image_submission();
@@ -59,30 +70,11 @@ impl ChatWidget {
                 {
                     return;
                 }
-                self.app_event_tx.send(AppEvent::FollowTranscript);
-                let should_submit_now = self.is_session_configured()
-                    && !self.is_plan_streaming_in_tui()
-                    && !self.input_queue.submissions_paused()
-                    && !self.input_queue.rate_limit_recovery_pending
-                    && (!self.input_queue.user_turn_pending_start
-                        || self.turn_lifecycle.agent_turn_running);
-                if should_submit_now {
-                    if self.only_user_shell_commands_running()
-                        && !user_message.text.starts_with('!')
-                    {
-                        self.queue_user_message(user_message);
-                        return;
-                    }
-                    // Submitted is emitted when user submits.
-                    // Reset any reasoning header only when we are actually submitting a turn.
-                    self.reasoning_buffer.clear();
-                    self.reasoning_header = None;
-                    self.reasoning_summary_parts.clear();
-                    self.set_status_header(String::from("Working"));
-                    self.submit_user_message(user_message);
-                } else {
-                    self.queue_user_message(user_message);
-                }
+                self.submit_or_queue_user_message(
+                    user_message,
+                    ShellEscapePolicy::Allow,
+                    UserMessageSource::Prompt,
+                );
             }
             InputResult::Queued {
                 text,
@@ -135,6 +127,54 @@ impl ChatWidget {
             self.app_event_tx.send(AppEvent::SettingsSelectionClosed);
         } else {
             self.maybe_send_next_queued_input();
+        }
+    }
+
+    /// Submits `user_message` as Enter would: now when the session takes input
+    /// (idle, or steering a running turn), otherwise into the follow-up queue.
+    /// Under `ShellEscapePolicy::Disallow` the text stays literal in both paths.
+    /// A `UserMessageSource::Prompt` clears pending questions; other sources keep them.
+    pub(super) fn submit_or_queue_user_message(
+        &mut self,
+        user_message: UserMessage,
+        shell_escape_policy: ShellEscapePolicy,
+        source: UserMessageSource,
+    ) -> UserMessageDisposition {
+        self.app_event_tx.send(AppEvent::FollowTranscript);
+        let can_submit_now = self.is_session_configured()
+            && !self.is_plan_streaming_in_tui()
+            && !self.input_queue.submissions_paused()
+            && !self.input_queue.rate_limit_recovery_pending
+            && (!self.input_queue.user_turn_pending_start
+                || self.turn_lifecycle.agent_turn_running);
+        let is_shell_escape =
+            shell_escape_policy == ShellEscapePolicy::Allow && user_message.text.starts_with('!');
+        let waits_for_user_shell_commands =
+            self.only_user_shell_commands_running() && !is_shell_escape;
+        if can_submit_now && !waits_for_user_shell_commands {
+            // Reset any reasoning header only when we are actually submitting a turn.
+            self.reasoning_buffer.clear();
+            self.reasoning_header = None;
+            self.reasoning_summary_parts.clear();
+            self.set_status_header(String::from("Working"));
+            return self
+                .submit_user_message_with_history_and_shell_escape_policy(
+                    user_message,
+                    UserMessageHistoryRecord::UserMessageText,
+                    shell_escape_policy,
+                    source,
+                )
+                .disposition();
+        }
+        let action = match shell_escape_policy {
+            ShellEscapePolicy::Allow => QueuedInputAction::Plain,
+            ShellEscapePolicy::Disallow => QueuedInputAction::Literal,
+        };
+        if self.queue_user_message_with_options_and_source(user_message, action, Vec::new(), source)
+        {
+            UserMessageDisposition::Queued
+        } else {
+            UserMessageDisposition::Dropped
         }
     }
 
