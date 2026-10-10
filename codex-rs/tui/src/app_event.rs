@@ -430,6 +430,13 @@ pub(crate) enum AppEvent {
         op: AppCommand,
     },
 
+    /// A `codex send` message arrived on the session's socket. The reply
+    /// carries whether it was submitted, queued, or rejected.
+    SendMessageReceived {
+        request: codex_send::SendRequest,
+        reply: tokio::sync::oneshot::Sender<codex_send::SendResponse>,
+    },
+
     /// Confirm retrying a safety-buffered turn with the server-selected model.
     ConfirmSafetyBufferedRetry {
         thread_id: ThreadId,
