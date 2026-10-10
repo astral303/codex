@@ -1049,6 +1049,9 @@ pub struct Config {
 
     /// Limits shared by all threads recording into one native rollout trace.
     pub rollout_trace_limits: TraceCaptureLimits,
+    /// When true, a running TUI session listens for `codex send` messages on
+    /// `$CODEX_HOME/ipc/<thread-id>.sock`.
+    pub ipc_enabled: bool,
 
     /// When true, session is not persisted on disk. Default to `false`
     pub ephemeral: bool,
@@ -4249,6 +4252,7 @@ impl Config {
             max_payload_bytes: rollout_trace.max_payload_bytes.unwrap_or(defaults.max_payload_bytes),
             max_bytes: rollout_trace.max_bytes.unwrap_or(defaults.max_bytes),
         };
+        let ipc_enabled = cfg.ipc.unwrap_or_default().enabled;
 
         if multi_agent_v2.max_concurrent_threads_per_session == 0 {
             return Err(std::io::Error::new(
@@ -4859,6 +4863,7 @@ impl Config {
             application_auth_route_config: None,
             history,
             rollout_trace_limits,
+            ipc_enabled,
             ephemeral: ephemeral.unwrap_or_default(),
             allow_persistent_dynamic_tool_updates: false,
             extra_config: None,

@@ -249,6 +249,7 @@ mod model_defaults;
 mod new_session;
 mod quick_dials;
 pub(crate) mod remote_control;
+mod send_endpoint;
 mod turn_tips;
 pub(crate) use new_session::has_launch_setting;
 mod archived_thread;
@@ -695,6 +696,7 @@ pub(crate) struct App {
     active_thread_id: Option<ThreadId>,
     active_thread_rx: Option<mpsc::Receiver<ThreadBufferedEvent>>,
     primary_thread_id: Option<ThreadId>,
+    send_endpoint: Option<send_endpoint::SendEndpointTask>,
     last_subagent_backfill_attempt: Option<ThreadId>,
     primary_session_configured: Option<ThreadSessionState>,
     pending_primary_events: VecDeque<ThreadBufferedEvent>,

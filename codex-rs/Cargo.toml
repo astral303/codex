@@ -113,6 +113,7 @@ members = [
     "runtime-agent-instance",
     "response-debug-context",
     "sandboxing",
+    "send",
     "otel",
     "otel-trace-websocket",
     "tcp-tunnel",
@@ -300,6 +301,7 @@ codex-secrets = { path = "secrets" }
 codex-shell-command = { path = "shell-command" }
 codex-skills-extension = { path = "ext/skills" }
 codex-skills = { path = "skills" }
+codex-send = { path = "send" }
 codex-state = { path = "state" }
 codex-terminal-detection = { path = "terminal-detection" }
 codex-test-binary-support = { path = "test-binary-support" }
