@@ -1294,6 +1294,11 @@ impl App {
             AppEvent::SubmitThreadOp { thread_id, op } => {
                 self.submit_thread_op(app_server, thread_id, op).await?;
             }
+            AppEvent::SendMessageReceived { request, reply } => {
+                let response = self.receive_sent_message(request);
+                // A sender that gave up waiting has already closed its side.
+                let _ = reply.send(response);
+            }
             AppEvent::ThreadHistoryEntryResponse { thread_id, event } => {
                 self.enqueue_thread_history_entry_response(thread_id, event)
                     .await?;

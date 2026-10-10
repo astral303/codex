@@ -2545,6 +2545,7 @@ dependencies = [
  "codex-rollout",
  "codex-rollout-trace",
  "codex-sandboxing",
+ "codex-send",
  "codex-skills-extension",
  "codex-state",
  "codex-stdio-to-uds",
@@ -2555,6 +2556,7 @@ dependencies = [
  "codex-utils-absolute-path",
  "codex-utils-cargo-bin",
  "codex-utils-cli",
+ "codex-utils-home-dir",
  "codex-utils-path",
  "codex-utils-path-uri",
  "codex-utils-process",
@@ -2592,6 +2594,7 @@ dependencies = [
  "tracing-subscriber",
  "unicode-segmentation",
  "url",
+ "uuid",
  "vt100",
  "which 8.0.0",
  "windows-sys 0.61.2",
@@ -4790,6 +4793,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-send"
+version = "0.0.0"
+dependencies = [
+ "codex-protocol",
+ "codex-uds",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "codex-shell-command"
 version = "0.0.0"
 dependencies = [
@@ -5061,6 +5079,7 @@ dependencies = [
  "codex-realtime-webrtc",
  "codex-rollout",
  "codex-sandboxing",
+ "codex-send",
  "codex-shell-command",
  "codex-state",
  "codex-terminal-detection",
