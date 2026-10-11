@@ -16,6 +16,7 @@ command exits 0 when the recipient accepted the message, and prints one of:
 | --- | --- |
 | `Delivered message to thread …` | The text entered the turn pipeline, as a steer or a new turn. |
 | `Thread … accepted the message and will submit it when it can take input.` | The session is still connecting, paused after a disconnect, or waiting on a reserved turn start. The text is held in the session's follow-up queue. |
+| `thread … rejected the message: the session is displaying another thread` (exit 1) | The recipient is displaying one of its subagent threads (`/agents`, `/multi-agents`). Nothing was submitted; resend after it returns to the thread. |
 | `no live session is listening for thread …` (exit 1) | No session owns that thread, or the recipient opted out. |
 | `the session endpoint … is not accepting connections` (exit 1) | A session exited without cleanup. The next session on that thread replaces the stale socket. |
 

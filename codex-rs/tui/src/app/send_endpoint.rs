@@ -10,6 +10,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use codex_protocol::ThreadId;
+use codex_send::SendRequest;
 use codex_send::SendResponse;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -48,6 +49,23 @@ impl Drop for SendEndpointTask {
 }
 
 impl App {
+    /// Rejects the message while a subagent thread is displayed: the chat
+    /// widget submits to the displayed thread, not to the endpoint's thread.
+    pub(super) fn receive_sent_message(&mut self, request: SendRequest) -> SendResponse {
+        if !self.endpoint_thread_is_displayed() {
+            return SendResponse::Rejected {
+                message: "the session is displaying another thread".to_string(),
+            };
+        }
+        self.chat_widget.submit_sent_message(request)
+    }
+
+    fn endpoint_thread_is_displayed(&self) -> bool {
+        self.send_endpoint
+            .as_ref()
+            .is_some_and(|endpoint| self.active_thread_id == Some(endpoint.thread_id))
+    }
+
     pub(super) fn bind_send_endpoint(&mut self, thread_id: ThreadId) {
         if !self.config.ipc_enabled {
             return;

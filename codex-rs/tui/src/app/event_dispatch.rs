@@ -1239,7 +1239,7 @@ impl App {
                 self.submit_thread_op(app_server, thread_id, op).await?;
             }
             AppEvent::SendMessageReceived { request, reply } => {
-                let response = self.chat_widget.submit_sent_message(request);
+                let response = self.receive_sent_message(request);
                 // A sender that gave up waiting has already closed its side.
                 let _ = reply.send(response);
             }

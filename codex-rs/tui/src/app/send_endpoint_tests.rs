@@ -93,6 +93,42 @@ async fn rebinding_the_same_thread_waits_for_the_previous_cleanup() {
 }
 
 #[tokio::test]
+async fn sent_message_is_rejected_while_another_thread_is_displayed() {
+    let mut app = make_test_app().await;
+    let codex_home = short_codex_home();
+    let primary = ThreadId::new();
+    let displayed_subagent = ThreadId::new();
+    app.primary_thread_id = Some(primary);
+    app.send_endpoint = Some(SendEndpointTask {
+        thread_id: primary,
+        socket_path: session_socket_path(codex_home.path(), primary),
+        bound: Arc::new(AtomicBool::new(false)),
+        task: None,
+    });
+    let request = |id: &str| SendRequest {
+        id: id.to_string(),
+        text: "hello".to_string(),
+    };
+
+    app.active_thread_id = Some(displayed_subagent);
+    let response = app.receive_sent_message(request("r1"));
+
+    assert_eq!(
+        response,
+        codex_send::SendResponse::Rejected {
+            message: "the session is displaying another thread".to_string(),
+        }
+    );
+    assert!(!app.chat_widget.has_queued_follow_up_messages());
+
+    app.active_thread_id = Some(primary);
+    let response = app.receive_sent_message(request("r2"));
+
+    assert_eq!(response, codex_send::SendResponse::Queued);
+    assert!(app.chat_widget.has_queued_follow_up_messages());
+}
+
+#[tokio::test]
 async fn endpoint_is_not_bound_when_ipc_is_disabled() {
     let mut app = make_test_app().await;
     let codex_home = short_codex_home();
