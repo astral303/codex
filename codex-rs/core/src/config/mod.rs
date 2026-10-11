@@ -978,6 +978,10 @@ pub struct Config {
     /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
     pub history: History,
 
+    /// When true, a running TUI session listens for `codex send` messages on
+    /// `$CODEX_HOME/ipc/<thread-id>.sock`.
+    pub ipc_enabled: bool,
+
     /// When true, session is not persisted on disk. Default to `false`
     pub ephemeral: bool,
 
@@ -3855,6 +3859,7 @@ impl Config {
         let allow_login_shell = cfg.allow_login_shell.unwrap_or(true);
 
         let history = cfg.history.unwrap_or_default();
+        let ipc_enabled = cfg.ipc.unwrap_or_default().enabled;
 
         if multi_agent_v2.max_concurrent_threads_per_session == 0 {
             return Err(std::io::Error::new(
@@ -4423,6 +4428,7 @@ impl Config {
             application_network_policy: Default::default(),
             application_auth_route_config: None,
             history,
+            ipc_enabled,
             ephemeral: ephemeral.unwrap_or_default(),
             extra_config: None,
             bypass_hook_trust,
