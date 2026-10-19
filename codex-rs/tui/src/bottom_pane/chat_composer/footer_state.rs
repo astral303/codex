@@ -120,6 +120,8 @@ impl super::ChatComposer {
                 find_transcript: self.footer.find_transcript_key,
                 focus_activity: self.footer.focus_activity_key,
                 history_search: self.footer.history_search_key,
+                undo: self.footer.undo_key,
+                redo: self.footer.redo_key,
                 reasoning_down: self.footer.reasoning_down_key,
                 reasoning_up: self.footer.reasoning_up_key,
                 toggle_voice: self
@@ -374,6 +376,8 @@ pub(super) struct FooterState {
     pub(super) queue_key: Option<ShortcutHint>,
     pub(super) toggle_shortcuts_key: Option<ShortcutHint>,
     pub(super) history_search_key: Option<ShortcutHint>,
+    pub(super) undo_key: Option<ShortcutHint>,
+    pub(super) redo_key: Option<ShortcutHint>,
     pub(super) reasoning_down_key: Option<ShortcutHint>,
     pub(super) reasoning_up_key: Option<ShortcutHint>,
     pub(super) toggle_voice_key: Option<ShortcutHint>,
