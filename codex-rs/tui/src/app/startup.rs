@@ -968,6 +968,7 @@ See the Codex keymap documentation for supported actions and examples."
             active_thread_id: None,
             active_thread_rx: None,
             primary_thread_id: None,
+            send_endpoint: None,
             last_subagent_backfill_attempt: None,
             primary_session_configured: None,
             pending_primary_events: VecDeque::new(),
