@@ -77,14 +77,29 @@ impl ChatComposer {
     }
 
     pub(super) fn record_edit_since(&mut self, before_edit: ComposerDraft) {
+        if self.draft_after_recordable_edit(&before_edit).is_some() {
+            self.undo_history.record(before_edit);
+        }
+    }
+
+    pub(super) fn record_keystroke_since(
+        &mut self,
+        before_edit: ComposerDraft,
+        edited_at: Instant,
+    ) {
+        if let Some(after_edit) = self.draft_after_recordable_edit(&before_edit) {
+            self.undo_history
+                .record_keystroke(before_edit, &after_edit, edited_at);
+        }
+    }
+
+    /// `None` when an active Vim transaction owns the edit or the content did not change.
+    fn draft_after_recordable_edit(&self, before_edit: &ComposerDraft) -> Option<ComposerDraft> {
         if self.vim_edit_transaction.is_active() {
-            return;
+            return None;
         }
         let after_edit = self.snapshot_draft();
-        if before_edit.has_same_content(&after_edit) {
-            return;
-        }
-        self.undo_history.record(before_edit);
+        (!before_edit.has_same_content(&after_edit)).then_some(after_edit)
     }
 
     pub(super) fn establish_undo_baseline(&mut self) {
@@ -151,6 +166,7 @@ impl ChatComposer {
 
     pub(super) fn dispatch_with_undo_history(
         &mut self,
+        dispatched_at: Instant,
         dispatch: impl FnOnce(&mut Self) -> (InputResult, bool),
     ) -> (InputResult, bool) {
         let before_edit = self.snapshot_draft();
@@ -170,7 +186,7 @@ impl ChatComposer {
         ) {
             self.establish_undo_baseline();
         } else if !nested_handler_mutated_history {
-            self.record_edit_since(before_edit);
+            self.record_keystroke_since(before_edit, dispatched_at);
         }
         self.sync_popups();
         result
@@ -203,6 +219,7 @@ impl ChatComposer {
             if !self.undo_history.try_discard_provisional_edits(
                 provisional_edit_count,
                 &expected_before_provisional_edits,
+                &draft_before_retro_capture,
             ) {
                 self.restore_draft(draft_before_retro_capture);
                 self.draft.paste_burst.clear_after_explicit_paste();

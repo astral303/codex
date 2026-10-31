@@ -174,18 +174,28 @@ impl ChatComposer {
                 true
             }
             FlushResult::Typed(ch) => {
-                let completion_space = self.draft.skill_completion_space_for_char(ch);
-                let started_vim_edit = completion_space.is_some() && self.begin_direct_vim_edit();
-                if let Some(space) = completion_space {
-                    self.draft.textarea.replace_range(space..space + 1, "");
-                }
-                self.insert_str(ch.to_string().as_str());
-                if started_vim_edit {
-                    self.finish_vim_edit();
-                }
+                self.insert_held_keystroke(ch, now);
                 true
             }
             FlushResult::None => false,
+        }
+    }
+
+    fn insert_held_keystroke(&mut self, ch: char, flushed_at: Instant) {
+        let started_vim_edit = self.begin_direct_vim_edit();
+        let before_edit = self.snapshot_draft();
+        // Undo restores the completion space together with the keystroke that replaced it.
+        if let Some(space) = self.draft.skill_completion_space_for_char(ch) {
+            self.draft.textarea.replace_range(space..space + 1, "");
+        }
+        self.insert_str_at_target_without_history(
+            self.draft.textarea.edit_target(),
+            ch.to_string().as_str(),
+            ShellPrefixHandling::Interpret,
+        );
+        self.record_keystroke_since(before_edit, flushed_at);
+        if started_vim_edit {
+            self.finish_vim_edit();
         }
     }
 
