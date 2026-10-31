@@ -180,6 +180,8 @@ pub(crate) enum HistorySearchDirection {
 pub(crate) struct HistoryNavigation {
     pub(crate) direction: HistorySearchDirection,
     pub(crate) entry: HistoryEntry,
+    /// True when Down moves past the newest prompt, back to the draft being written.
+    pub(crate) returns_to_draft: bool,
 }
 
 /// Result of a single incremental history search step.
@@ -483,6 +485,7 @@ impl ChatComposerHistory {
                 Some(HistoryNavigation {
                     direction: HistorySearchDirection::Newer,
                     entry: HistoryEntry::new(String::new()),
+                    returns_to_draft: true,
                 })
             }
         }
@@ -578,7 +581,11 @@ impl ChatComposerHistory {
                     .unwrap_or(HistoryEntryResponse::Ignored);
             }
             self.record_recalled_text(entry.text.clone());
-            return HistoryEntryResponse::Found(HistoryNavigation { direction, entry });
+            return HistoryEntryResponse::Found(HistoryNavigation {
+                direction,
+                entry,
+                returns_to_draft: false,
+            });
         }
 
         HistoryEntryResponse::Ignored
@@ -888,7 +895,11 @@ impl ChatComposerHistory {
                 }
                 self.pending_navigation_direction = None;
                 self.record_recalled_text(entry.text.clone());
-                return Some(HistoryNavigation { direction, entry });
+                return Some(HistoryNavigation {
+                    direction,
+                    entry,
+                    returns_to_draft: false,
+                });
             }
 
             if global_idx >= self.persistent_entry_count {
@@ -1017,6 +1028,7 @@ mod tests {
         HistoryNavigation {
             direction: HistorySearchDirection::Older,
             entry,
+            returns_to_draft: false,
         }
     }
 
