@@ -141,7 +141,7 @@ fn is_one_char(text: &str) -> bool {
 }
 
 /// The newest undo step while it can still absorb the next typed character or deletion.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct OpenTypingStep {
     edit: TypingEdit,
     started_at: Instant,
@@ -169,7 +169,7 @@ impl OpenTypingStep {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct StoredDraft {
     retained_bytes: usize,
     draft: ComposerDraft,
@@ -184,7 +184,7 @@ impl StoredDraft {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct ComposerUndoHistory {
     undo: VecDeque<StoredDraft>,
     redo: VecDeque<StoredDraft>,
@@ -302,6 +302,15 @@ impl ComposerUndoHistory {
     pub(super) fn clear(&mut self) {
         self.clear_stacks();
         self.advance_mutation_epoch();
+    }
+
+    /// Replace this history with one saved earlier. The saved typing step is closed.
+    pub(super) fn restore_saved(&mut self, saved: ComposerUndoHistory) {
+        // Callers detect history changes by epoch, so the restored history takes a new epoch.
+        let mutation_epoch = self.mutation_epoch.wrapping_add(1);
+        *self = saved;
+        self.mutation_epoch = mutation_epoch;
+        self.open_typing_step = None;
     }
 
     pub(super) fn try_discard_provisional_edits(

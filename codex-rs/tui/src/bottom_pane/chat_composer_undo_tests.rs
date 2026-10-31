@@ -201,6 +201,64 @@ fn history_down_reuses_ctrl_c_redo_lineage() {
     assert_eq!(composer.snapshot_draft(), before_second_edit);
 }
 
+/// Types "ab" as one step, then deletes it as a second step, leaving the composer empty.
+fn type_and_delete_a_draft(composer: &mut ChatComposer) -> ComposerDraft {
+    let start = Instant::now();
+    assert!(press_at(composer, KeyCode::Char('a'), start));
+    assert!(press_at(composer, KeyCode::Char('b'), start));
+    let typed = composer.snapshot_draft();
+    assert!(press_at(
+        composer,
+        KeyCode::Backspace,
+        start + TYPING_STEP_PAUSE
+    ));
+    assert!(press_at(
+        composer,
+        KeyCode::Backspace,
+        start + TYPING_STEP_PAUSE
+    ));
+    assert!(composer.is_empty());
+    typed
+}
+
+#[test]
+fn down_past_the_newest_prompt_restores_the_draft_undo_history() {
+    let (mut composer, _rx) = new_composer();
+    composer
+        .history
+        .record_local_submission(HistoryEntry::new("older prompt".to_string()));
+    let typed = type_and_delete_a_draft(&mut composer);
+
+    assert!(press(&mut composer, KeyCode::Up));
+    assert_eq!(composer.current_text(), "older prompt");
+    assert!(press(&mut composer, KeyCode::Down));
+    assert!(composer.is_empty());
+
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.snapshot_draft(), typed);
+    assert!(press(&mut composer, UNDO_KEY));
+    assert!(composer.is_empty());
+    assert!(!press(&mut composer, UNDO_KEY));
+}
+
+#[test]
+fn editing_a_recalled_prompt_discards_the_draft_saved_for_down() {
+    let (mut composer, _rx) = new_composer();
+    composer
+        .history
+        .record_local_submission(HistoryEntry::new("older prompt".to_string()));
+    type_and_delete_a_draft(&mut composer);
+
+    assert!(press(&mut composer, KeyCode::Up));
+    assert!(press_after_typing_pause(&mut composer, KeyCode::Char('!')));
+    // Deleting the edit makes the text match the recalled prompt again, so Down navigates.
+    assert!(press_after_typing_pause(&mut composer, KeyCode::Backspace));
+    assert!(press(&mut composer, KeyCode::Down));
+
+    assert!(composer.is_empty());
+    assert!(!press(&mut composer, UNDO_KEY));
+}
+
 #[test]
 fn unrelated_history_recall_starts_a_new_undo_baseline() {
     let (mut composer, _rx) = new_composer();

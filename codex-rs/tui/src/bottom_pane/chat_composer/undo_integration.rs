@@ -14,7 +14,15 @@ use super::InputResult;
 use super::draft_state::ComposerMentionBinding;
 use super::undo::ComposerDraft;
 use super::undo::ComposerDraftContent;
+use super::undo::ComposerUndoHistory;
 use super::vim_history::VimEditTransaction;
+
+/// The draft and undo history from before Up started browsing prompt history. Down past the
+/// newest prompt restores both.
+pub(super) struct HistoryBrowseOrigin {
+    draft: ComposerDraft,
+    undo_history: ComposerUndoHistory,
+}
 
 impl ChatComposer {
     pub(in crate::bottom_pane) fn snapshot_draft(&self) -> ComposerDraft {
@@ -85,16 +93,30 @@ impl ChatComposer {
         }
     }
 
-    /// `None` when an active Vim transaction owns the edit or the content did not change.
-    fn draft_after_recordable_edit(&self, before_edit: &ComposerDraft) -> Option<ComposerDraft> {
+    /// `None` when an active Vim transaction owns the edit or the content did not change. A
+    /// recordable edit also discards the draft saved for Down, because an edited recalled prompt
+    /// replaces it.
+    fn draft_after_recordable_edit(
+        &mut self,
+        before_edit: &ComposerDraft,
+    ) -> Option<ComposerDraft> {
         if self.vim_edit_transaction.is_active() {
             return None;
         }
         let after_edit = self.snapshot_draft();
-        (!before_edit.has_same_content(&after_edit)).then_some(after_edit)
+        if before_edit.has_same_content(&after_edit) {
+            return None;
+        }
+        self.history_browse_origin = None;
+        Some(after_edit)
     }
 
     pub(super) fn establish_undo_baseline(&mut self) {
+        self.history_browse_origin = None;
+        self.clear_undo_history();
+    }
+
+    fn clear_undo_history(&mut self) {
         self.vim_edit_transaction = VimEditTransaction::default();
         self.undo_history.clear();
     }
@@ -140,7 +162,22 @@ impl ChatComposer {
     }
 
     pub(super) fn apply_history_navigation(&mut self, navigation: HistoryNavigation) {
+        if navigation.returns_to_draft
+            && let Some(origin) = self.history_browse_origin.take()
+        {
+            self.restore_draft_preserving_vim_state(origin.draft);
+            self.undo_history.restore_saved(origin.undo_history);
+            return;
+        }
         let current = self.snapshot_draft();
+        if navigation.direction == HistorySearchDirection::Older
+            && self.history_browse_origin.is_none()
+        {
+            self.history_browse_origin = Some(HistoryBrowseOrigin {
+                draft: current.clone(),
+                undo_history: self.undo_history.clone(),
+            });
+        }
         self.apply_history_entry(navigation.entry);
         let recalled = self.snapshot_draft();
         let adjacent_draft = match navigation.direction {
@@ -152,7 +189,7 @@ impl ChatComposer {
                 self.restore_draft_preserving_vim_state(draft);
                 self.move_cursor_to_history_entry_end();
             }
-            Some(_) | None => self.establish_undo_baseline(),
+            Some(_) | None => self.clear_undo_history(),
         }
     }
 
