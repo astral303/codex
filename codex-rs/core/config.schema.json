@@ -2569,6 +2569,18 @@
       },
       "type": "object"
     },
+    "Ipc": {
+      "additionalProperties": false,
+      "description": "Settings for the per-session socket that `codex send` delivers messages through.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "When false, running sessions do not listen for `codex send` messages.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "KeybindingsSpec": {
       "anyOf": [
         {
@@ -8247,6 +8259,14 @@
     "instructions": {
       "description": "System instructions.",
       "type": "string"
+    },
+    "ipc": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Ipc"
+        }
+      ],
+      "description": "Settings for the per-session socket that `codex send` delivers messages through."
     },
     "log_dir": {
       "allOf": [

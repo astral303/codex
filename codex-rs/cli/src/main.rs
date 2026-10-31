@@ -76,6 +76,7 @@ mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
 mod sandbox_uninstall;
+mod send_cmd;
 mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;
@@ -85,6 +86,7 @@ use crate::plugin_cmd::PluginCli;
 use crate::plugin_cmd::PluginSubcommand;
 use crate::queue_cmd::QueueCommand;
 use crate::remote_control_cmd::RemoteControlCommand;
+use crate::send_cmd::SendCommand;
 use codex_exec_server_cli::ExecServerCommand;
 use doctor::DoctorCommand;
 use state_db_recovery as local_state_db;
@@ -207,6 +209,9 @@ enum Subcommand {
 
     /// Queue a message for an existing session.
     Queue(QueueCommand),
+
+    /// Deliver a message to a running session now (steer or start a turn).
+    Send(SendCommand),
 
     /// Archive a saved session by id or session name.
     Archive(SessionArchiveCommand),
@@ -1569,6 +1574,10 @@ async fn cli_main(
             .await?;
             println!("{output}");
         }
+        Some(Subcommand::Send(cmd)) => {
+            let output = send_cmd::run_send_command(cmd).await?;
+            println!("{output}");
+        }
         Some(Subcommand::Queue(cmd)) => {
             let output = queue_cmd::run_queue_command(
                 cmd,
@@ -1984,6 +1993,7 @@ fn profile_v2_for_subcommand<'a>(
         | Subcommand::Review(_)
         | Subcommand::Resume(_)
         | Subcommand::Queue(_)
+        | Subcommand::Send(_)
         | Subcommand::Archive(_)
         | Subcommand::Delete(_)
         | Subcommand::Unarchive(_)
@@ -2361,6 +2371,7 @@ fn unsupported_subcommand_name_for_strict_config(
         | Some(Subcommand::ExecServer(_))
         | Some(Subcommand::Resume(_))
         | Some(Subcommand::Queue(_))
+        | Some(Subcommand::Send(_))
         | Some(Subcommand::Archive(_))
         | Some(Subcommand::Delete(_))
         | Some(Subcommand::Unarchive(_))
