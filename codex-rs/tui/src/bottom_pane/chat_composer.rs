@@ -95,7 +95,8 @@
 //! Enter accepts a matching preview and discards the saved prompt; without a match, search stays open.
 //! Up/Down does not create undo steps. When recalled content matches the adjacent undo or redo
 //! state, navigation reuses that state and preserves earlier history; unrelated recalls establish
-//! a new undo baseline.
+//! a new undo baseline. Down past the newest prompt restores the draft and undo history from
+//! before Up started browsing, unless the user edited a recalled prompt.
 //! Vim commands and insert sessions contribute grouped steps to the same history as ordinary
 //! editor actions. Normal-mode `u` undoes and normal-mode `Ctrl+R` redoes on that shared history;
 //! insert-mode `Ctrl+R` keeps prompt-history search, and explicitly configured keybindings retain
@@ -446,6 +447,7 @@ use self::slash_input::SlashValidation;
 use self::slash_input::SubmissionValidation;
 pub(in crate::bottom_pane) use self::undo::ComposerDraft;
 use self::undo::ComposerUndoHistory;
+use self::undo_integration::HistoryBrowseOrigin;
 use self::vim_history::VimEditTransaction;
 use crate::app_event::AppEvent;
 use crate::app_event::ConnectorsSnapshot;
@@ -646,6 +648,7 @@ pub(crate) struct ChatComposer {
     history: ChatComposerHistory,
     pub(super) command_center_enabled: bool,
     undo_history: ComposerUndoHistory,
+    history_browse_origin: Option<HistoryBrowseOrigin>,
     footer: FooterState,
     has_focus: bool,
     frame_requester: Option<FrameRequester>,
@@ -771,6 +774,7 @@ impl ChatComposer {
             history: ChatComposerHistory::new(),
             command_center_enabled: false,
             undo_history: ComposerUndoHistory::default(),
+            history_browse_origin: None,
             footer: FooterState {
                 quit_shortcut_expires_at: None,
                 quit_shortcut_key: key_hint::ctrl(KeyCode::Char('c')),
@@ -6389,6 +6393,7 @@ mod tests {
             Some(HistoryNavigation {
                 direction: HistorySearchDirection::Older,
                 entry: HistoryEntry::new("draft text".to_string()),
+                returns_to_draft: false,
             })
         );
     }
@@ -6769,6 +6774,7 @@ mod tests {
                     Vec::new(),
                     vec![remote_image_url],
                 ),
+                returns_to_draft: false,
             })
         );
     }
