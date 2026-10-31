@@ -121,7 +121,9 @@
 //! # Undo and Redo
 //!
 //! `ChatComposer` records complete editable drafts so one action restores text, cursor, elements,
-//! pending paste payloads, mentions, shell mode, and image attachments together. Content-changing
+//! pending paste payloads, mentions, shell mode, and image attachments together. Continuous typing
+//! forms one entry until a one-second pause, one second of typing, a cursor move, or a switch
+//! between typing and deleting; one-character deletions group the same way. Other content-changing
 //! key events, paste, image attachment, external-editor replacement, and `Ctrl+C` clear each create
 //! one entry; cursor-only movement leaves redo intact. Submission and programmatic draft replacement
 //! establish a new baseline that undo cannot cross. Vim `u`, Vim `Ctrl+R`, and composer undo/redo
@@ -2068,14 +2070,17 @@ impl ChatComposer {
             return (InputResult::None, changed);
         }
 
-        self.dispatch_with_undo_history(|composer| match &mut composer.popups.active {
-            ActivePopup::Command(_) => composer.handle_key_event_with_slash_popup(key_event),
-            ActivePopup::File(_) => composer.handle_key_event_with_file_popup(key_event),
-            ActivePopup::Skill(_) => composer.handle_key_event_with_skill_popup(key_event),
-            ActivePopup::MentionV2(_) => {
-                composer.handle_key_event_with_mentions_v2_popup(key_event)
+        let dispatched_at = tokio::time::Instant::now().into_std();
+        self.dispatch_with_undo_history(dispatched_at, |composer| {
+            match &mut composer.popups.active {
+                ActivePopup::Command(_) => composer.handle_key_event_with_slash_popup(key_event),
+                ActivePopup::File(_) => composer.handle_key_event_with_file_popup(key_event),
+                ActivePopup::Skill(_) => composer.handle_key_event_with_skill_popup(key_event),
+                ActivePopup::MentionV2(_) => {
+                    composer.handle_key_event_with_mentions_v2_popup(key_event)
+                }
+                ActivePopup::None => composer.handle_key_event_without_popup(key_event),
             }
-            ActivePopup::None => composer.handle_key_event_without_popup(key_event),
         })
     }
 
@@ -2125,7 +2130,7 @@ impl ChatComposer {
             self.draft
                 .pending_pastes
                 .retain(|(placeholder, _)| text_after.contains(placeholder));
-            self.record_edit_since(before_edit);
+            self.record_keystroke_since(before_edit, now);
             return (InputResult::None, true);
         }
         if let KeyEvent {
@@ -2181,7 +2186,7 @@ impl ChatComposer {
         let before_edit = self.snapshot_draft();
         self.draft.textarea.input(input);
         self.reconcile_deleted_elements(elements_before);
-        self.record_edit_since(before_edit);
+        self.record_keystroke_since(before_edit, now);
         (InputResult::None, true)
     }
 
@@ -3887,7 +3892,7 @@ impl ChatComposer {
         }
 
         if !vim_finish_recorded_edit {
-            self.record_edit_since(before_edit);
+            self.record_keystroke_since(before_edit, now);
         }
         (InputResult::None, true)
     }

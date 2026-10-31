@@ -129,10 +129,23 @@ impl ChatComposer {
                 true
             }
             FlushResult::Typed(ch) => {
-                self.insert_str(ch.to_string().as_str());
+                self.insert_held_keystroke(ch, now);
                 true
             }
             FlushResult::None => false,
+        }
+    }
+
+    fn insert_held_keystroke(&mut self, ch: char, flushed_at: Instant) {
+        let started_vim_edit = self.begin_direct_vim_edit();
+        let before_edit = self.snapshot_draft();
+        self.insert_str_at_target_without_history(
+            self.draft.textarea.edit_target(),
+            ch.to_string().as_str(),
+        );
+        self.record_keystroke_since(before_edit, flushed_at);
+        if started_vim_edit {
+            self.finish_vim_edit();
         }
     }
 
