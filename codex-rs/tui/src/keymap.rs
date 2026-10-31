@@ -211,6 +211,35 @@ pub(crate) fn default_composer_redo_binding() -> KeyBinding {
     KeyBinding::new(KeyCode::Char('z'), modifiers)
 }
 
+/// macOS adds Command-Z after Alt-Z. It reaches Codex only in terminals that pass it through;
+/// Terminal.app and iTerm2 keep Command-Z for their own Edit menus.
+fn default_composer_undo_bindings() -> Vec<KeyBinding> {
+    let mut bindings = vec![default_composer_undo_binding()];
+    if cfg!(target_os = "macos") {
+        bindings.push(command_undo_binding());
+    }
+    bindings
+}
+
+fn default_composer_redo_bindings() -> Vec<KeyBinding> {
+    let mut bindings = vec![default_composer_redo_binding()];
+    if cfg!(target_os = "macos") {
+        bindings.push(command_redo_binding());
+    }
+    bindings
+}
+
+fn command_undo_binding() -> KeyBinding {
+    KeyBinding::new(KeyCode::Char('z'), KeyModifiers::SUPER)
+}
+
+fn command_redo_binding() -> KeyBinding {
+    KeyBinding::new(
+        KeyCode::Char('z'),
+        KeyModifiers::SUPER | KeyModifiers::SHIFT,
+    )
+}
+
 /// Editor-specific keybindings used by the composer textarea.
 ///
 /// These bindings are interpreted only by text-editing widgets and do not
@@ -736,16 +765,21 @@ impl RuntimeKeymap {
             })
             .collect();
 
-        let undo_default_is_shadowed = keymap.composer.undo.is_none()
-            && defaults.composer.undo.iter().any(|binding| {
-                configured_main_surface_binding_is_used(keymap, *binding)
-                    || configured_chord_prefix_is_used(&chords, KeymapContext::Composer, *binding)
-            });
-        let redo_default_is_shadowed = keymap.composer.redo.is_none()
-            && defaults.composer.redo.iter().any(|binding| {
-                configured_main_surface_binding_is_used(keymap, *binding)
-                    || configured_chord_prefix_is_used(&chords, KeymapContext::Composer, *binding)
-            });
+        // Undo and redo defaults yield, one key at a time, to existing custom keys and chord prefixes.
+        let unshadowed_composer_defaults = |defaults: &[KeyBinding]| -> Vec<KeyBinding> {
+            defaults
+                .iter()
+                .copied()
+                .filter(|binding| {
+                    !configured_main_surface_binding_is_used(keymap, *binding)
+                        && !configured_chord_prefix_is_used(
+                            &chords,
+                            KeymapContext::Composer,
+                            *binding,
+                        )
+                })
+                .collect()
+        };
         let app = AppKeymap {
             open_agents: resolve_bindings(
                 keymap.global.open_agents.as_ref(),
@@ -886,13 +920,13 @@ impl RuntimeKeymap {
                 history_search_previous
             ),
             history_search_next: resolve_local!(keymap, defaults, composer, history_search_next),
-            undo: if undo_default_is_shadowed {
-                Vec::new()
+            undo: if keymap.composer.undo.is_none() {
+                unshadowed_composer_defaults(&defaults.composer.undo)
             } else {
                 resolve_local!(keymap, defaults, composer, undo)
             },
-            redo: if redo_default_is_shadowed {
-                Vec::new()
+            redo: if keymap.composer.redo.is_none() {
+                unshadowed_composer_defaults(&defaults.composer.redo)
             } else {
                 resolve_local!(keymap, defaults, composer, redo)
             },
@@ -1775,8 +1809,8 @@ impl RuntimeKeymap {
                 ],
                 history_search_previous: default_bindings![ctrl(KeyCode::Char('r'))],
                 history_search_next: default_bindings![ctrl(KeyCode::Char('s'))],
-                undo: vec![default_composer_undo_binding()],
-                redo: vec![default_composer_redo_binding()],
+                undo: default_composer_undo_bindings(),
+                redo: default_composer_redo_bindings(),
             },
             editor: Arc::new(EditorKeymap {
                 insert_newline: default_bindings![
@@ -3147,17 +3181,33 @@ mod tests {
         } else {
             KeyModifiers::ALT
         };
+        let mut expected_undo = vec![KeyBinding::new(KeyCode::Char('z'), undo_redo_modifier)];
+        let mut expected_redo = vec![KeyBinding::new(
+            KeyCode::Char('z'),
+            undo_redo_modifier | KeyModifiers::SHIFT,
+        )];
+        expected_undo.extend(on_macos(KeyBinding::new(
+            KeyCode::Char('z'),
+            KeyModifiers::SUPER,
+        )));
+        expected_redo.extend(on_macos(KeyBinding::new(
+            KeyCode::Char('z'),
+            KeyModifiers::SUPER | KeyModifiers::SHIFT,
+        )));
         assert_eq!(
             (runtime.composer.undo, runtime.composer.redo),
-            (
-                vec![KeyBinding::new(KeyCode::Char('z'), undo_redo_modifier,)],
-                vec![KeyBinding::new(
-                    KeyCode::Char('z'),
-                    undo_redo_modifier | KeyModifiers::SHIFT,
-                )],
-            )
+            (expected_undo, expected_redo)
         );
         assert_eq!(runtime.editor.kill_whole_line, Vec::new());
+    }
+
+    /// Command-key undo and redo defaults exist only on macOS.
+    fn on_macos(binding: KeyBinding) -> Vec<KeyBinding> {
+        if cfg!(target_os = "macos") {
+            vec![binding]
+        } else {
+            Vec::new()
+        }
     }
 
     #[test]
@@ -3169,8 +3219,13 @@ mod tests {
 
         let runtime = RuntimeKeymap::from_config(&keymap).expect("editor bindings should win");
 
-        assert!(runtime.composer.undo.is_empty());
-        assert!(runtime.composer.redo.is_empty());
+        assert_eq!(
+            (runtime.composer.undo, runtime.composer.redo),
+            (
+                on_macos(command_undo_binding()),
+                on_macos(command_redo_binding()),
+            )
+        );
     }
 
     #[test]
@@ -3185,7 +3240,10 @@ mod tests {
 
         assert_eq!(
             (runtime.composer.undo, runtime.composer.redo),
-            (Vec::new(), Vec::new())
+            (
+                on_macos(command_undo_binding()),
+                on_macos(command_redo_binding()),
+            )
         );
         assert!(runtime.chords.bindings.iter().any(|binding| {
             binding.action.context == KeymapContext::Editor
