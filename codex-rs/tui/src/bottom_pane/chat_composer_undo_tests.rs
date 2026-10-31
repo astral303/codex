@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 use std::time::Instant;
 
 use codex_config::types::KeybindingSpec;
@@ -11,6 +12,7 @@ use pretty_assertions::assert_eq;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::unbounded_channel;
 
+use super::undo::TYPING_STEP_PAUSE;
 use super::*;
 use crate::app_event::AppEvent;
 use crate::bottom_pane::AppEventSender;
@@ -41,9 +43,14 @@ fn press(composer: &mut ChatComposer, code: KeyCode) -> bool {
         .1
 }
 
+/// Starts a new typing step, so undo can return to the draft before this key.
+fn press_after_typing_pause(composer: &mut ChatComposer, code: KeyCode) -> bool {
+    press_at(composer, code, Instant::now() + TYPING_STEP_PAUSE)
+}
+
 fn press_at(composer: &mut ChatComposer, code: KeyCode, now: Instant) -> bool {
     composer
-        .dispatch_with_undo_history(|composer| {
+        .dispatch_with_undo_history(now, |composer| {
             composer.handle_input_basic_with_time(KeyEvent::new(code, KeyModifiers::NONE), now)
         })
         .1
@@ -74,6 +81,30 @@ fn undo_walks_typing_then_explicit_paste_in_reverse_order() {
     assert_eq!(composer.snapshot_draft(), after_paste);
     assert!(press(&mut composer, REDO_KEY));
     assert_eq!(composer.snapshot_draft(), after_typing);
+}
+
+#[test]
+fn continuous_typing_is_one_undo_step_until_a_pause() {
+    let (mut composer, _rx) = new_composer();
+    let start = Instant::now();
+    for (offset_ms, ch) in [(0, 'h'), (200, 'i'), (400, ' ')] {
+        assert!(press_at(
+            &mut composer,
+            KeyCode::Char(ch),
+            start + Duration::from_millis(offset_ms)
+        ));
+    }
+    assert!(press_at(
+        &mut composer,
+        KeyCode::Char('!'),
+        start + Duration::from_millis(1400)
+    ));
+
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.current_text(), "hi ");
+    assert!(press(&mut composer, UNDO_KEY));
+    assert_eq!(composer.current_text(), "");
+    assert!(!press(&mut composer, UNDO_KEY));
 }
 
 #[test]
@@ -111,7 +142,7 @@ fn history_up_reuses_ctrl_c_undo_lineage_without_becoming_an_undo_step() {
     let (mut composer, _rx) = new_composer();
     assert!(press(&mut composer, KeyCode::Char('a')));
     let before_second_edit = composer.snapshot_draft();
-    assert!(press(&mut composer, KeyCode::Char('b')));
+    assert!(press_after_typing_pause(&mut composer, KeyCode::Char('b')));
     composer.set_current_cursor(/*cursor*/ 1);
     let before_clear = composer.snapshot_draft();
 
@@ -154,7 +185,7 @@ fn history_down_reuses_ctrl_c_redo_lineage() {
     let (mut composer, _rx) = new_composer();
     assert!(press(&mut composer, KeyCode::Char('a')));
     let before_second_edit = composer.snapshot_draft();
-    assert!(press(&mut composer, KeyCode::Char('b')));
+    assert!(press_after_typing_pause(&mut composer, KeyCode::Char('b')));
     let before_clear = composer.snapshot_draft();
 
     assert!(composer.clear_for_ctrl_c().is_some());
@@ -209,7 +240,7 @@ fn async_history_recall_uses_the_same_undo_lineage_transition() {
     composer.set_history_metadata(thread_id, /*log_id*/ 1, /*entry_count*/ 0);
     assert!(press(&mut composer, KeyCode::Char('a')));
     let before_second_edit = composer.snapshot_draft();
-    assert!(press(&mut composer, KeyCode::Char('b')));
+    assert!(press_after_typing_pause(&mut composer, KeyCode::Char('b')));
     composer.set_current_cursor(/*cursor*/ 1);
     let before_clear = composer.snapshot_draft();
     assert!(composer.clear_for_ctrl_c().is_some());
@@ -321,10 +352,13 @@ fn detected_paste_burst_joins_an_active_vim_insert_transaction() {
 #[test]
 fn missing_provisional_boundary_falls_back_without_losing_older_history() {
     let (mut composer, _rx) = new_composer();
-    composer.set_disable_paste_burst(/*disabled*/ false);
     composer.set_text_content("base".to_string(), Vec::new(), Vec::new());
     composer.move_cursor_to_end();
-    let now = Instant::now();
+    let start = Instant::now();
+    // An earlier typing step that the fallback must keep.
+    assert!(press_at(&mut composer, KeyCode::Char('.'), start));
+    composer.set_disable_paste_burst(/*disabled*/ false);
+    let now = start + TYPING_STEP_PAUSE;
     let mut chars = MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT.chars();
     let first = chars.next().expect("first provisional character");
     let second = chars.next().expect("second provisional character");
@@ -339,16 +373,16 @@ fn missing_provisional_boundary_falls_back_without_losing_older_history() {
     assert!(!composer.is_in_paste_burst());
     assert_eq!(
         composer.current_text(),
-        format!("base{MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT}")
+        format!("base.{MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT}")
     );
     assert!(press(&mut composer, UNDO_KEY));
-    assert_eq!(composer.current_text(), format!("base{first}{second}"));
+    assert_eq!(composer.current_text(), format!("base.{first}{second}"));
     assert!(press(&mut composer, UNDO_KEY));
     assert_eq!(composer.current_text(), "base");
 }
 
 #[test]
-fn disabled_paste_burst_keeps_plain_keys_as_individual_undo_steps() {
+fn disabled_paste_burst_treats_fast_keys_as_ordinary_typing() {
     let (mut composer, _rx) = new_composer();
     let now = Instant::now();
 
@@ -362,13 +396,6 @@ fn disabled_paste_burst_keeps_plain_keys_as_individual_undo_steps() {
     );
 
     assert!(press(&mut composer, UNDO_KEY));
-    assert_eq!(
-        composer.current_text(),
-        MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT
-            .chars()
-            .take(MINIMUM_NON_ASCII_RETRO_CAPTURE_INPUT.chars().count() - 1)
-            .collect::<String>()
-    );
-    assert!(press(&mut composer, UNDO_KEY));
-    assert_eq!(composer.current_text(), "界");
+    assert_eq!(composer.current_text(), "");
+    assert!(!press(&mut composer, UNDO_KEY));
 }
