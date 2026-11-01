@@ -233,10 +233,16 @@ pub(super) fn handle_startup_draft_key(
         }
     }
 
+    if key_hint::has_ctrl_or_alt(key.modifiers) {
+        if bottom_pane.is_safe_startup_editor_key(key) {
+            bottom_pane.handle_startup_editor_key(key);
+        }
+        return Ok(());
+    }
+
     let is_safe_startup_editor_key = bottom_pane.is_safe_startup_editor_key(key);
     if !is_safe_startup_editor_key
-        && (key_hint::has_ctrl_or_alt(key.modifiers)
-            || key.code == KeyCode::Enter
+        && (key.code == KeyCode::Enter
             || key
                 .modifiers
                 .intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)

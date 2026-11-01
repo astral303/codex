@@ -419,11 +419,11 @@ fn internal_snapshot_restores_exact_mention_identity() {
     commands(&mut composer, "p");
     let pasted = composer.snapshot_draft();
     assert_eq!(
-        pasted.mention_bindings,
+        pasted.content.mention_bindings,
         vec![
-            original.mention_bindings[0].clone(),
-            original.mention_bindings[0].clone(),
-            original.mention_bindings[1].clone(),
+            original.content.mention_bindings[0].clone(),
+            original.content.mention_bindings[0].clone(),
+            original.content.mention_bindings[1].clone(),
         ]
     );
     commands(&mut composer, "u");

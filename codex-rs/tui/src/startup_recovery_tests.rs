@@ -7,8 +7,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use pretty_assertions::assert_eq;
 
-fn snapshot(text: &str) -> ComposerDraftSnapshot {
-    ComposerDraftSnapshot {
+fn snapshot(text: &str) -> StartupDraftSnapshot {
+    StartupDraftSnapshot {
         text: text.to_string(),
         cursor: text.len(),
         text_elements: Vec::new(),

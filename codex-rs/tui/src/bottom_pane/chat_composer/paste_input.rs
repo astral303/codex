@@ -17,10 +17,19 @@ impl ChatComposer {
     }
 
     fn insert_str_at_target(&mut self, target: EditTarget, text: &str) {
+        let started_vim_edit = self.begin_direct_vim_edit();
+        let before_edit = self.snapshot_draft();
+        self.insert_str_at_target_without_history(target, text);
+        self.record_edit_since(before_edit);
+        if started_vim_edit {
+            self.finish_vim_edit();
+        }
+    }
+
+    pub(super) fn insert_str_at_target_without_history(&mut self, target: EditTarget, text: &str) {
         if !text.is_empty() && self.sparkle.draft.get() == sparkle::SparkleDraft::Untouched {
             self.dismiss_sparkle();
         }
-        let started_vim_edit = self.begin_direct_vim_edit();
         let elements_before = target
             .replaces_text()
             .then(|| self.draft.textarea.element_payloads());
@@ -30,13 +39,10 @@ impl ChatComposer {
         }
         self.sync_bash_mode_from_text();
         self.sync_popups();
-        if started_vim_edit {
-            self.finish_vim_edit();
-        }
     }
 
     /// Include accepted but unflushed keys without changing live paste detection.
-    pub(crate) fn recovery_snapshot(&self) -> ComposerDraftSnapshot {
+    pub(crate) fn recovery_snapshot(&self) -> StartupDraftSnapshot {
         let mut snapshot = self.draft_snapshot();
         let pending = self.draft.paste_burst.clone().flush_pending();
         if matches!(pending, FlushResult::None) {
@@ -123,10 +129,23 @@ impl ChatComposer {
                 true
             }
             FlushResult::Typed(ch) => {
-                self.insert_str(ch.to_string().as_str());
+                self.insert_held_keystroke(ch, now);
                 true
             }
             FlushResult::None => false,
+        }
+    }
+
+    fn insert_held_keystroke(&mut self, ch: char, flushed_at: Instant) {
+        let started_vim_edit = self.begin_direct_vim_edit();
+        let before_edit = self.snapshot_draft();
+        self.insert_str_at_target_without_history(
+            self.draft.textarea.edit_target(),
+            ch.to_string().as_str(),
+        );
+        self.record_keystroke_since(before_edit, flushed_at);
+        if started_vim_edit {
+            self.finish_vim_edit();
         }
     }
 
@@ -150,6 +169,20 @@ impl ChatComposer {
     ///
     /// Composer edits clear paste-burst Enter suppression and sync popups.
     pub(super) fn apply_paste(&mut self, pasted: String) -> bool {
+        if self.draft.textarea.vim_query().is_some() {
+            return self.apply_paste_without_history(pasted);
+        }
+        let started_vim_edit = self.begin_direct_vim_edit();
+        let before_edit = self.snapshot_draft();
+        let needs_redraw = self.apply_paste_without_history(pasted);
+        self.record_edit_since(before_edit);
+        if started_vim_edit {
+            self.finish_vim_edit();
+        }
+        needs_redraw
+    }
+
+    fn apply_paste_without_history(&mut self, pasted: String) -> bool {
         let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
         let pasted = sanitize_user_text(pasted.into());
         if self.history_search.is_some() {
@@ -163,7 +196,6 @@ impl ChatComposer {
             return true;
         }
         self.draft.textarea_state.get_mut().follow_cursor();
-        let started_vim_edit = self.begin_direct_vim_edit();
         let elements_before = self.draft.textarea.element_payloads();
         let target = self.draft.textarea.edit_target();
         let before_cursor = &self.draft.textarea.text()[..target.start()];
@@ -197,7 +229,7 @@ impl ChatComposer {
             let cursor = self.draft.textarea.cursor();
             self.draft.textarea.insert_str_at(cursor, " ");
         } else {
-            self.insert_str_at_target(target, &pasted);
+            self.insert_str_at_target_without_history(target, &pasted);
         }
         if is_blockquote {
             let textarea = &mut self.draft.textarea;
@@ -206,9 +238,6 @@ impl ChatComposer {
         self.draft.paste_burst.clear_after_explicit_paste();
         self.reconcile_deleted_elements(elements_before);
         self.sync_popups();
-        if started_vim_edit {
-            self.finish_vim_edit();
-        }
         true
     }
 
