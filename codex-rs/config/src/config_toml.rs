@@ -17,6 +17,7 @@ use crate::types::AppsConfigToml;
 use crate::types::AuthCredentialsStoreMode;
 use crate::types::FeedbackConfigToml;
 use crate::types::History;
+use crate::types::Ipc;
 use crate::types::MarketplaceConfig;
 use crate::types::McpEnterpriseManagedAuthConfig;
 use crate::types::McpServerConfig;
@@ -371,6 +372,9 @@ pub struct ConfigToml {
     /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
     #[serde(default = "default_history")]
     pub history: Option<History>,
+
+    /// Settings for the per-session socket that `codex send` delivers messages through.
+    pub ipc: Option<Ipc>,
 
     /// Directory where Codex stores the SQLite state DB.
     /// Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`.
