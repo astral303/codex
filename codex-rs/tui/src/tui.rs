@@ -1050,7 +1050,7 @@ impl Tui {
 
     /// Emit a desktop notification now if the terminal is unfocused.
     /// Returns true if a notification was posted.
-    pub fn notify(&mut self, message: impl AsRef<str>) -> bool {
+    pub fn notify(&mut self, session_title: Option<&str>, message: impl AsRef<str>) -> bool {
         let terminal_focused = self.is_terminal_focused();
         if !should_emit_notification(self.notification_condition, terminal_focused) {
             return false;
@@ -1061,7 +1061,7 @@ impl Tui {
         };
 
         let message = message.as_ref().to_string();
-        match backend.notify(&message) {
+        match backend.notify(session_title, &message) {
             Ok(()) => true,
             Err(err) => {
                 let method = backend.method();

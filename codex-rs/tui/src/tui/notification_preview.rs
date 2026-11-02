@@ -7,7 +7,7 @@ impl Tui {
     pub(crate) fn notify_test(&mut self, message: &str) -> bool {
         let condition = self.notification_condition;
         self.notification_condition = NotificationCondition::Always;
-        let sent = self.notify(message);
+        let sent = self.notify(/*session_title*/ None, message);
         self.notification_condition = condition;
         sent
     }
