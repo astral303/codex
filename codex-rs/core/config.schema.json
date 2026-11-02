@@ -3698,6 +3698,7 @@
       "enum": [
         "auto",
         "osc9",
+        "osc777",
         "bel"
       ],
       "type": "string"
