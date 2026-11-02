@@ -3293,6 +3293,22 @@ async fn status_line_thread_credits_remain_visible_when_usd_is_unavailable() {
 }
 
 #[tokio::test]
+async fn notification_session_title_uses_the_thread_name_then_the_project_name() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_name = Some("x".repeat(60));
+    assert_eq!(
+        chat.notification_session_title(),
+        Some(format!("{}...", "x".repeat(45)))
+    );
+
+    chat.thread_name = None;
+    assert_eq!(
+        chat.notification_session_title(),
+        Some("project".to_string())
+    );
+}
+
+#[tokio::test]
 async fn terminal_title_thread_usage_fetches_and_renders_without_status_line() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();

@@ -13784,6 +13784,17 @@ fn test_tui_notification_method() {
 }
 
 #[test]
+fn test_tui_notification_method_osc777() {
+    let toml = r#"
+            [tui]
+            notification_method = "osc777"
+        "#;
+    let parsed: RootTomlTest =
+        toml::from_str(toml).expect("deserialize notification_method=\"osc777\"");
+    assert_eq!(parsed.tui.notifications.method, NotificationMethod::Osc777);
+}
+
+#[test]
 fn test_tui_notification_condition_defaults_to_unfocused() {
     let toml = r#"
             [tui]
