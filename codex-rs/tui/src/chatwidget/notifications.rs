@@ -18,8 +18,15 @@ impl ChatWidget {
 
     pub(crate) fn maybe_post_pending_notification(&mut self, tui: &mut crate::tui::Tui) {
         if let Some(notif) = self.pending_notification.take() {
-            tui.notify(notif.display());
+            let session_title = self.notification_session_title();
+            tui.notify(session_title.as_deref(), notif.display());
         }
+    }
+
+    pub(super) fn notification_session_title(&mut self) -> Option<String> {
+        let now = Instant::now();
+        self.terminal_title_value_for_item(TerminalTitleItem::ThreadName, now)
+            .or_else(|| self.terminal_title_value_for_item(TerminalTitleItem::Project, now))
     }
 }
 
