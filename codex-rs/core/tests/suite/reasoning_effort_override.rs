@@ -587,6 +587,10 @@ async fn reasoning_effort_override_capacity_retry_keeps_latest_adjacent_update()
             config.model_provider.supports_websockets = false;
             config.model_provider.request_max_retries = Some(0);
             config.model_provider.stream_max_retries = Some(0);
+            config
+                .features
+                .disable(Feature::ModelAtCapacityRetries)
+                .expect("disable model-at-capacity retries");
         })
         .build_with_auto_env(&server)
         .await?;

@@ -237,6 +237,8 @@ pub enum Feature {
     EnableRequestCompression,
     /// Keep active sampling turns alive until a failed network connection recovers.
     UnboundedConnectionRetries,
+    /// Retry a model-at-capacity error after 2, 10, and 30 minutes before failing the turn.
+    ModelAtCapacityRetries,
     /// Start the managed network proxy for sandboxed sessions.
     NetworkProxy,
     /// Mask credentials and inject them through an already enabled network proxy.
@@ -1607,6 +1609,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::UnboundedConnectionRetries,
         key: "unbounded_connection_retries",
+        stage: Stage::Stable,
+        default_enabled: true,
+    },
+    FeatureSpec {
+        id: Feature::ModelAtCapacityRetries,
+        key: "model_at_capacity_retries",
         stage: Stage::Stable,
         default_enabled: true,
     },

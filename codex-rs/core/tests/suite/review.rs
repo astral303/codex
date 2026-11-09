@@ -312,6 +312,10 @@ async fn review_overload_preserves_lifecycle_order() {
     let codex = new_conversation_for_server(&server, Arc::new(TempDir::new().unwrap()), |config| {
         config.model_provider.request_max_retries = Some(0);
         config.model_provider.stream_max_retries = Some(0);
+        config
+            .features
+            .disable(Feature::ModelAtCapacityRetries)
+            .expect("disable model-at-capacity retries");
     })
     .await;
 
