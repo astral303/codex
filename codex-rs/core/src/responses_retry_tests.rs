@@ -5,8 +5,10 @@ use super::log_retry;
 use crate::realtime_history::RealtimeHistoryState;
 use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
+use codex_features::Feature;
 use codex_http_client::RetryAfter;
 use codex_protocol::error::CodexErr;
+use codex_protocol::error::CodexErrorDetails;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -97,4 +99,79 @@ async fn stream_retry_preserves_deadline_across_delayed_notification() {
         (advice.deadline()..=advice.deadline() + Duration::from_millis(1)).contains(&resumed_at),
         "retry resumed at {resumed_at:?}, expected {advice:?}"
     );
+}
+
+#[tokio::test]
+async fn model_at_capacity_retries_after_two_ten_and_thirty_minutes_then_fails() {
+    let (session, turn_context) = make_session_and_context().await;
+    let step_context = StepContext::for_test(Arc::new(turn_context));
+    let mut client_session = session.services.model_client.new_session();
+    let mut retry_state = ResponsesStreamRetryState::default();
+    tokio::time::pause();
+
+    for minutes in [2, 10, 30] {
+        let delay = Duration::from_secs(minutes * 60);
+        let started_at = Instant::now();
+        handle_response_stream_error(
+            &mut retry_state,
+            /*max_retries*/ 0,
+            CodexErr::ServerOverloaded,
+            &mut client_session,
+            &session,
+            &step_context,
+            ResponsesStreamRequest::Sampling,
+        )
+        .await
+        .expect("model at capacity should be retried");
+        // Tokio rounds timer deadlines up to the next millisecond.
+        let waited = started_at.elapsed();
+        assert!(
+            (delay..=delay + Duration::from_millis(1)).contains(&waited),
+            "retry waited {waited:?}, expected {delay:?}"
+        );
+    }
+
+    let started_at = Instant::now();
+    let err = handle_response_stream_error(
+        &mut retry_state,
+        /*max_retries*/ 0,
+        CodexErr::ServerOverloaded,
+        &mut client_session,
+        &session,
+        &step_context,
+        ResponsesStreamRequest::Sampling,
+    )
+    .await
+    .expect_err("the fourth model-at-capacity error should fail the turn");
+    assert!(matches!(err.details(), CodexErrorDetails::ServerOverloaded));
+    assert_eq!(started_at.elapsed(), Duration::ZERO);
+}
+
+#[tokio::test]
+async fn model_at_capacity_fails_at_once_when_its_retries_are_disabled() {
+    let (session, mut turn_context) = make_session_and_context().await;
+    let mut config = (*turn_context.config).clone();
+    config
+        .features
+        .disable(Feature::ModelAtCapacityRetries)
+        .expect("disable model-at-capacity retries");
+    turn_context.config = Arc::new(config);
+    let step_context = StepContext::for_test(Arc::new(turn_context));
+    let mut client_session = session.services.model_client.new_session();
+    tokio::time::pause();
+
+    let started_at = Instant::now();
+    let err = handle_response_stream_error(
+        &mut ResponsesStreamRetryState::default(),
+        /*max_retries*/ 0,
+        CodexErr::ServerOverloaded,
+        &mut client_session,
+        &session,
+        &step_context,
+        ResponsesStreamRequest::Sampling,
+    )
+    .await
+    .expect_err("model at capacity should fail the turn");
+    assert!(matches!(err.details(), CodexErrorDetails::ServerOverloaded));
+    assert_eq!(started_at.elapsed(), Duration::ZERO);
 }
