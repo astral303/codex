@@ -22,6 +22,13 @@ use tracing::warn;
 
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
+/// Wait minutes between model-at-capacity retries, because capacity takes that long to return.
+/// Keep the schedule short: an overload without `Retry-After` can also mean a disabled model.
+const MODEL_AT_CAPACITY_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_secs(2 * 60),
+    Duration::from_secs(10 * 60),
+    Duration::from_secs(30 * 60),
+];
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
@@ -46,6 +53,7 @@ pub(crate) struct ResponsesStreamRetryState {
     retries: u64,
     connection_retries: u64,
     connection_retry_delay: Duration,
+    model_at_capacity_retries: usize,
 }
 
 impl Default for ResponsesStreamRetryState {
@@ -54,6 +62,7 @@ impl Default for ResponsesStreamRetryState {
             retries: 0,
             connection_retries: 0,
             connection_retry_delay: INITIAL_CONNECTION_RETRY_DELAY,
+            model_at_capacity_retries: 0,
         }
     }
 }
@@ -69,6 +78,82 @@ pub(crate) struct ExhaustedResponseRetry {
 /// it is terminal or the retry budget is exhausted.
 #[tracing::instrument(level = "trace", skip_all, fields(request = ?request))]
 pub(crate) async fn handle_response_stream_error(
+    retry_state: &mut ResponsesStreamRetryState,
+    max_retries: u64,
+    err: CodexErr,
+    client_session: &mut ModelClientSession,
+    sess: &Session,
+    step_context: &StepContext,
+    request: ResponsesStreamRequest,
+) -> Result<(), CodexErr> {
+    let Err(err) = handle_response_stream_error_without_capacity_retry(
+        retry_state,
+        max_retries,
+        err,
+        client_session,
+        sess,
+        step_context,
+        request,
+    )
+    .await
+    else {
+        return Ok(());
+    };
+    wait_to_retry_model_at_capacity(retry_state, err, sess, step_context, request).await
+}
+
+/// Waits out the next model-at-capacity delay once the stream retries give up on a sampling
+/// request. Returns any other error unchanged.
+async fn wait_to_retry_model_at_capacity(
+    retry_state: &mut ResponsesStreamRetryState,
+    err: CodexErr,
+    sess: &Session,
+    step_context: &StepContext,
+    request: ResponsesStreamRequest,
+) -> Result<(), CodexErr> {
+    let turn_context = &step_context.turn;
+    if !matches!(request, ResponsesStreamRequest::Sampling)
+        || !matches!(err.details(), CodexErrorDetails::ServerOverloaded)
+        || turn_context.session_source.is_internal()
+        || !turn_context
+            .config
+            .features
+            .enabled(Feature::ModelAtCapacityRetries)
+    {
+        return Err(err);
+    }
+    let Some(&delay) = MODEL_AT_CAPACITY_RETRY_DELAYS.get(retry_state.model_at_capacity_retries)
+    else {
+        return Err(err);
+    };
+    retry_state.model_at_capacity_retries += 1;
+    // The attempt after a capacity wait gets the full stream retry budget again.
+    retry_state.retries = 0;
+    let retry = retry_state.model_at_capacity_retries;
+    let retry_limit = MODEL_AT_CAPACITY_RETRY_DELAYS.len();
+    warn!(
+        turn_id = %turn_context.sub_id,
+        retry,
+        ?delay,
+        "model at capacity; waiting to retry sampling request"
+    );
+    let now = Instant::now();
+    let retry_at = err
+        .retry_after()
+        .map_or(now + delay, |advice| advice.deadline().max(now + delay));
+    let minutes = delay.as_secs() / 60;
+    sess.notify_stream_error(
+        turn_context,
+        format!("Model at capacity. Retrying in {minutes} min ({retry}/{retry_limit})"),
+        err,
+    )
+    .await;
+    codex_client::record_retry!(retry as u64, delay, RetryOperation::Sampling);
+    tokio::time::sleep_until(retry_at).await;
+    Ok(())
+}
+
+async fn handle_response_stream_error_without_capacity_retry(
     retry_state: &mut ResponsesStreamRetryState,
     max_retries: u64,
     err: CodexErr,

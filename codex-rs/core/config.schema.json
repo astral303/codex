@@ -1211,6 +1211,9 @@
             "mentions_v2": {
               "type": "boolean"
             },
+            "model_at_capacity_retries": {
+              "type": "boolean"
+            },
             "model_catalog_in_context": {
               "type": "boolean"
             },
@@ -8501,6 +8504,9 @@
           "type": "boolean"
         },
         "mentions_v2": {
+          "type": "boolean"
+        },
+        "model_at_capacity_retries": {
           "type": "boolean"
         },
         "model_catalog_in_context": {

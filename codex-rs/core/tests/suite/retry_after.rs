@@ -4,6 +4,7 @@ use codex_api::map_api_error;
 use codex_client::RetryOn;
 use codex_client::RetryPolicy;
 use codex_client::run_with_retry;
+use codex_features::Feature;
 use codex_http_client::Request;
 use codex_http_client::RetryAfter;
 use codex_http_client::TransportError;
@@ -526,6 +527,10 @@ async fn responses_http_overload_respects_retry_limits(
         .with_config(move |config| {
             config.model_provider.request_max_retries = Some(2);
             config.model_provider.stream_max_retries = Some(stream_max_retries);
+            config
+                .features
+                .disable(Feature::ModelAtCapacityRetries)
+                .expect("disable model-at-capacity retries");
         })
         .build_with_auto_env(&server)
         .await?;
@@ -1291,6 +1296,10 @@ async fn sse_overload_with_retry_after_is_terminal() -> Result<()> {
         .with_config(|config| {
             config.model_provider.request_max_retries = Some(2);
             config.model_provider.stream_max_retries = Some(2);
+            config
+                .features
+                .disable(Feature::ModelAtCapacityRetries)
+                .expect("disable model-at-capacity retries");
         })
         .build_with_auto_env(&server)
         .await?;
@@ -1363,6 +1372,10 @@ async fn sse_overload_without_retry_after_is_terminal() -> Result<()> {
         .with_config(|config| {
             config.model_provider.request_max_retries = Some(2);
             config.model_provider.stream_max_retries = Some(2);
+            config
+                .features
+                .disable(Feature::ModelAtCapacityRetries)
+                .expect("disable model-at-capacity retries");
         })
         .build_with_auto_env(&server)
         .await?;
@@ -2080,6 +2093,10 @@ async fn websocket_overload_retries_only_while_it_has_retry_after(
                 Some(bundled_models_response().expect("bundled models.json should parse"));
             config.model_provider.request_max_retries = Some(2);
             config.model_provider.stream_max_retries = Some(3);
+            config
+                .features
+                .disable(Feature::ModelAtCapacityRetries)
+                .expect("disable model-at-capacity retries");
         })
         .build_with_websocket_server(&server)
         .await?;
@@ -2178,6 +2195,10 @@ async fn websocket_overload_without_retry_after_is_terminal() -> Result<()> {
                 Some(bundled_models_response().expect("bundled models.json should parse"));
             config.model_provider.request_max_retries = Some(2);
             config.model_provider.stream_max_retries = Some(2);
+            config
+                .features
+                .disable(Feature::ModelAtCapacityRetries)
+                .expect("disable model-at-capacity retries");
         })
         .build_with_websocket_server(&server)
         .await?;
