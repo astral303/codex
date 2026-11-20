@@ -652,7 +652,7 @@ impl ChatComposerConfig {
             blockquote_paste_enabled: true,
             trim_submission: true,
             reset_vim_on_submission: true,
-            undo_enabled: false,
+            undo_enabled: true,
         }
     }
 }
