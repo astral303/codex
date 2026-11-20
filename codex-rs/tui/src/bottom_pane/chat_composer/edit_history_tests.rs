@@ -1075,3 +1075,26 @@ fn external_editor_result_is_one_undo_step() {
     composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
     assert_eq!(composer.current_text(), "edited draft");
 }
+
+#[test]
+fn down_past_the_newest_prompt_restores_the_draft_undo_history() {
+    let (mut composer, _) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    composer
+        .history
+        .record_local_submission(HistoryEntry::new("earlier prompt".to_owned()));
+    keys(&mut composer, "draft");
+    for _ in 0.."draft".len() {
+        composer.handle_key_event(KeyCode::Backspace.into());
+    }
+    composer.handle_key_event(KeyCode::Up.into());
+    assert_eq!(composer.current_text(), "earlier prompt");
+    composer.handle_key_event(KeyCode::Down.into());
+    assert_eq!(composer.current_text(), "");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "draft");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "");
+    composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
+    assert_eq!(composer.current_text(), "draft");
+}
