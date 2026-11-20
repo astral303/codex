@@ -43,9 +43,10 @@ impl DesktopNotificationBackend {
         }
     }
 
-    pub fn notify(&mut self, message: &str) -> io::Result<()> {
+    /// OSC 9 and BEL ignore `session_title` because they have no title field.
+    pub fn notify(&mut self, session_title: Option<&str>, message: &str) -> io::Result<()> {
         match self {
-            DesktopNotificationBackend::Osc(backend) => backend.notify(message),
+            DesktopNotificationBackend::Osc(backend) => backend.notify(session_title, message),
             DesktopNotificationBackend::Bel(backend) => backend.notify(message),
         }
     }
