@@ -40,8 +40,9 @@
 //! A cached plugin skill keeps its ranking when its installed version changes.
 //!
 //! Ordinary prompt undo records the complete draft before each edit. Contiguous typing shares a
-//! step until a pause or cursor move; consecutive Backspaces share their own step until a pause
-//! or another edit. Paste bursts stay open until flushing classifies the input.
+//! step until a pause or cursor move; consecutive Backspaces, or consecutive forward Deletes,
+//! share their own step until a pause or another edit. Paste bursts stay open until flushing
+//! classifies the input.
 //! Detected paste bursts, including those promoted by Enter or Tab, form a separate step from typing.
 //! Retroactive detection reuses the pre-replacement draft when the burst began over a selection.
 //! Clipboard attachments also settle buffered typing first. Undo restores text and attachments together;

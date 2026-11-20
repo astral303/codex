@@ -1044,3 +1044,22 @@ fn undo_history_drops_only_steps_beyond_its_limit() {
     }
     assert_eq!(composer.current_text(), "x");
 }
+
+#[test]
+fn consecutive_forward_deletes_are_one_undo_step() {
+    let (mut composer, _) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    composer.set_text_content("abcdef".to_owned(), Vec::new(), Vec::new());
+    composer.set_current_cursor(/*cursor*/ 1);
+    for _ in 0..3 {
+        composer.handle_key_event(KeyCode::Delete.into());
+    }
+    assert_eq!(composer.current_text(), "aef");
+    keys(&mut composer, "x");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "aef");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "abcdef");
+    composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
+    assert_eq!(composer.current_text(), "aef");
+}
