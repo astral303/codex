@@ -42,7 +42,8 @@
 //! Ordinary prompt undo records the complete draft before each edit. Contiguous typing shares a
 //! step until a pause or cursor move; consecutive Backspaces, or consecutive forward Deletes,
 //! share their own step until a pause or another edit. Paste bursts stay open until flushing
-//! classifies the input. An external editor's result is one step.
+//! classifies the input. An external editor's result is one step. Up saves the draft and its
+//! history before recalling a prompt, and Down past the newest prompt restores both.
 //! Detected paste bursts, including those promoted by Enter or Tab, form a separate step from typing.
 //! Retroactive detection reuses the pre-replacement draft when the burst began over a selection.
 //! Clipboard attachments also settle buffered typing first. Undo restores text and attachments together;
@@ -440,6 +441,7 @@ use self::attachment_state::AttachmentState;
 use self::draft_state::ComposerMentionBinding;
 use self::draft_state::DraftState;
 use self::edit_history::EditHistory;
+use self::edit_history::HistoryBrowseOrigin;
 pub(crate) use self::footer_state::CommandPopupPlacement;
 use self::footer_state::ComposerLayout;
 pub(crate) use self::footer_state::ComposerRenderOptions;
@@ -694,6 +696,7 @@ pub(crate) struct ChatComposer {
     side_conversation_active: bool,
     history_search: Option<HistorySearchSession>,
     edit_history: EditHistory,
+    history_browse_origin: Option<HistoryBrowseOrigin>,
     vim_register: vim_register::VimRegister,
     submit_keys: Vec<KeyBinding>,
     queue_keys: Vec<KeyBinding>,
@@ -884,6 +887,7 @@ impl ChatComposer {
             side_conversation_active: false,
             history_search: None,
             edit_history: EditHistory::default(),
+            history_browse_origin: None,
             vim_register: vim_register::VimRegister::default(),
             submit_keys: vec![key_hint::plain(KeyCode::Enter)],
             queue_keys: vec![key_hint::plain(KeyCode::Tab)],
@@ -3347,6 +3351,7 @@ impl ChatComposer {
                 | InputResult::CommandWithArgs(_, _, _)
         ) {
             self.edit_history = EditHistory::default();
+            self.history_browse_origin = None;
             if self.config.reset_vim_on_submission {
                 self.reset_vim_mode();
             }
@@ -3769,12 +3774,17 @@ impl ChatComposer {
                 )
             {
                 let replace_entry = if history_up_pressed {
+                    self.save_history_browse_origin();
                     self.history.navigate_up(&self.app_event_tx)
                 } else {
                     self.history.navigate_down(&self.app_event_tx)
                 };
                 if let Some(entry) = replace_entry {
-                    self.apply_history_entry(entry);
+                    let returned_to_draft =
+                        !self.history.is_navigating() && self.restore_history_browse_origin();
+                    if !returned_to_draft {
+                        self.apply_history_entry(entry);
+                    }
                     return (InputResult::None, true);
                 }
             }

@@ -47,6 +47,12 @@ pub(super) struct EditHistory {
     delete_forward: Option<(Instant, usize)>,
 }
 
+/// The draft and its undo history from before Up started browsing prompt history.
+pub(super) struct HistoryBrowseOrigin {
+    draft: ComposerDraft,
+    edit_history: EditHistory,
+}
+
 impl ComposerDraft {
     fn history_bytes(&self) -> usize {
         let mut bytes = self.text.len()
@@ -123,6 +129,26 @@ impl ChatComposer {
             self.edit_history.redo.clear();
             self.edit_history.trim();
         }
+    }
+
+    /// Set the draft and its undo history aside when Up starts browsing prompt history.
+    pub(super) fn save_history_browse_origin(&mut self) {
+        if !self.history.is_navigating() {
+            self.history_browse_origin = Some(HistoryBrowseOrigin {
+                draft: self.snapshot_draft(),
+                edit_history: std::mem::take(&mut self.edit_history),
+            });
+        }
+    }
+
+    /// Restore the draft and its undo history when Down moves past the newest prompt.
+    pub(super) fn restore_history_browse_origin(&mut self) -> bool {
+        let Some(origin) = self.history_browse_origin.take() else {
+            return false;
+        };
+        self.restore_draft(origin.draft);
+        self.edit_history = origin.edit_history;
+        true
     }
 
     pub(super) fn wants_edit_history_key(&self, event: KeyEvent) -> bool {
