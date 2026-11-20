@@ -42,7 +42,7 @@
 //! Ordinary prompt undo records the complete draft before each edit. Contiguous typing shares a
 //! step until a pause or cursor move; consecutive Backspaces, or consecutive forward Deletes,
 //! share their own step until a pause or another edit. Paste bursts stay open until flushing
-//! classifies the input.
+//! classifies the input. An external editor's result is one step.
 //! Detected paste bursts, including those promoted by Enter or Tab, form a separate step from typing.
 //! Retroactive detection reuses the pre-replacement draft when the burst began over a selection.
 //! Clipboard attachments also settle buffered typing first. Undo restores text and attachments together;
@@ -1373,7 +1373,7 @@ impl ChatComposer {
     /// remote images). Cursor is placed at the end after rebuilding elements.
     pub(crate) fn apply_external_edit(&mut self, text: String) {
         self.note_sparkle_replaced_text(&text);
-        self.edit_history = EditHistory::default();
+        let started_edit = self.begin_direct_edit();
         self.draft.pending_pastes.clear();
         let (text, _) = self.imported_text_for_textarea(text, Vec::new());
 
@@ -1449,6 +1449,9 @@ impl ChatComposer {
             .textarea
             .set_cursor(self.draft.textarea.text().len());
         self.sync_popups();
+        if started_edit {
+            self.finish_edit();
+        }
     }
 
     /// Enable or disable Vim editing for the composer textarea.
