@@ -16,8 +16,8 @@ use super::ComposerDraft;
 use crate::key_hint::KeyBindingListExt;
 use crossterm::event::KeyEvent;
 
-const MAX_UNDO_STEPS: usize = 64;
-const MAX_UNDO_BYTES: usize = 8 * 1024 * 1024;
+const MAX_UNDO_STEPS: usize = 1000;
+const MAX_UNDO_BYTES: usize = 32 * 1024 * 1024;
 
 enum EditDirection {
     Undo,
@@ -31,6 +31,9 @@ enum TypingEdit {
     Continue,
     BackspaceStart,
     BackspaceContinue(usize),
+    DeleteForwardStart,
+    /// The visible text length before this deletion.
+    DeleteForwardContinue(usize),
 }
 
 #[derive(Debug, Default)]
@@ -41,6 +44,13 @@ pub(super) struct EditHistory {
     typing: Option<(Instant, Instant, usize, Option<usize>)>,
     typing_edit: Option<TypingEdit>,
     backspace: Option<(Instant, usize)>,
+    delete_forward: Option<(Instant, usize)>,
+}
+
+/// The draft and its undo history from before Up started browsing prompt history.
+pub(super) struct HistoryBrowseOrigin {
+    draft: ComposerDraft,
+    edit_history: EditHistory,
 }
 
 impl ComposerDraft {
@@ -73,6 +83,7 @@ impl EditHistory {
     ) -> Option<ComposerDraft> {
         self.typing = None;
         self.backspace = None;
+        self.delete_forward = None;
         let (from, to) = match direction {
             EditDirection::Undo => (&mut self.undo, &mut self.redo),
             EditDirection::Redo => (&mut self.redo, &mut self.undo),
@@ -118,6 +129,26 @@ impl ChatComposer {
             self.edit_history.redo.clear();
             self.edit_history.trim();
         }
+    }
+
+    /// Set the draft and its undo history aside when Up starts browsing prompt history.
+    pub(super) fn save_history_browse_origin(&mut self) {
+        if !self.history.is_navigating() {
+            self.history_browse_origin = Some(HistoryBrowseOrigin {
+                draft: self.snapshot_draft(),
+                edit_history: std::mem::take(&mut self.edit_history),
+            });
+        }
+    }
+
+    /// Restore the draft and its undo history when Down moves past the newest prompt.
+    pub(super) fn restore_history_browse_origin(&mut self) -> bool {
+        let Some(origin) = self.history_browse_origin.take() else {
+            return false;
+        };
+        self.restore_draft(origin.draft);
+        self.edit_history = origin.edit_history;
+        true
     }
 
     pub(super) fn wants_edit_history_key(&self, event: KeyEvent) -> bool {
@@ -171,7 +202,8 @@ impl ChatComposer {
         true
     }
 
-    /// Group contiguous ordinary typing and backward-character deletions separately.
+    /// Group contiguous ordinary typing, backward-character deletions, and forward-character
+    /// deletions separately.
     pub(super) fn begin_composer_key_edit(&mut self, event: KeyEvent) {
         if !self.config.undo_enabled
             || self.draft.textarea.is_vim_enabled()
@@ -200,11 +232,13 @@ impl ChatComposer {
             return;
         }
         let previous_backspace = self.edit_history.backspace.take();
+        let previous_delete_forward = self.edit_history.delete_forward.take();
+        let deletes_at_cursor = selection.is_none()
+            && !self.popups.active()
+            && self.attachments.selected_remote_image_index.is_none();
         if self.editor_keymap.delete_backward.is_pressed(event)
             && !self.editor_keymap.delete_backward_word.is_pressed(event)
-            && selection.is_none()
-            && !self.popups.active()
-            && self.attachments.selected_remote_image_index.is_none()
+            && deletes_at_cursor
         {
             self.edit_history.typing = None;
             if previous_backspace.is_some_and(|(last, cursor)| {
@@ -214,6 +248,23 @@ impl ChatComposer {
                     Some(TypingEdit::BackspaceContinue(self.current_cursor()));
             } else {
                 self.edit_history.typing_edit = Some(TypingEdit::BackspaceStart);
+                self.begin_edit_transaction();
+            }
+            return;
+        }
+        if self.editor_keymap.delete_forward.is_pressed(event)
+            && !self.editor_keymap.delete_forward_word.is_pressed(event)
+            && deletes_at_cursor
+        {
+            self.edit_history.typing = None;
+            if previous_delete_forward.is_some_and(|(last, cursor)| {
+                last.elapsed() < Duration::from_millis(500) && cursor == self.current_cursor()
+            }) {
+                self.edit_history.typing_edit = Some(TypingEdit::DeleteForwardContinue(
+                    self.draft.textarea.text().len(),
+                ));
+            } else {
+                self.edit_history.typing_edit = Some(TypingEdit::DeleteForwardStart);
                 self.begin_edit_transaction();
             }
             return;
@@ -338,6 +389,7 @@ impl ChatComposer {
 
         self.edit_history.typing = None;
         self.edit_history.backspace = None;
+        self.edit_history.delete_forward = None;
         self.begin_edit_transaction();
         if self.edit_history.pending.is_none() {
             return false;
@@ -395,6 +447,12 @@ impl ChatComposer {
             self.edit_history.backspace = (cursor < previous).then(|| (Instant::now(), cursor));
             return;
         }
+        if let Some(TypingEdit::DeleteForwardContinue(previous_len)) = typing_edit {
+            let cursor = self.current_cursor();
+            self.edit_history.delete_forward =
+                (self.draft.textarea.text().len() < previous_len).then(|| (Instant::now(), cursor));
+            return;
+        }
         if matches!(typing_edit, Some(TypingEdit::Continue)) {
             let cursor = self.current_cursor();
             self.edit_history.typing =
@@ -422,6 +480,9 @@ impl ChatComposer {
         self.edit_history.undo.push_back(snapshot);
         self.edit_history.backspace = matches!(typing_edit, Some(TypingEdit::BackspaceStart))
             .then(|| (now, self.current_cursor()));
+        self.edit_history.delete_forward =
+            matches!(typing_edit, Some(TypingEdit::DeleteForwardStart))
+                .then(|| (now, self.current_cursor()));
         self.edit_history.typing = match typing_edit {
             Some(TypingEdit::Start) => Some((now, now, self.current_cursor(), None)),
             Some(TypingEdit::ReplaceSelection(start)) => {
@@ -430,7 +491,9 @@ impl ChatComposer {
             Some(
                 TypingEdit::Continue
                 | TypingEdit::BackspaceStart
-                | TypingEdit::BackspaceContinue(_),
+                | TypingEdit::BackspaceContinue(_)
+                | TypingEdit::DeleteForwardStart
+                | TypingEdit::DeleteForwardContinue(_),
             )
             | None => None,
         };

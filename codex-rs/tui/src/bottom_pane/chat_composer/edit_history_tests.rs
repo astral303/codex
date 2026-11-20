@@ -12,6 +12,7 @@ use pretty_assertions::assert_eq;
 
 use super::super::super::chat_composer_history::HistoryEntry;
 use super::super::ChatComposer;
+use super::super::ChatComposerConfig;
 use super::super::ComposerDraftSnapshot;
 use super::super::InputResult;
 use super::super::LARGE_PASTE_CHAR_THRESHOLD;
@@ -1030,4 +1031,83 @@ fn altgr_delete_word_is_an_undoable_deletion() {
     assert_eq!(composer.current_text(), "hello ");
     composer.handle_key_event(KeyCode::F(7).into());
     assert_eq!(composer.current_text(), "hello world");
+}
+
+#[test]
+fn undo_history_drops_only_steps_beyond_its_limit() {
+    let (mut composer, _) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    for _ in 0..=super::MAX_UNDO_STEPS {
+        composer.handle_paste("x".to_owned());
+    }
+    for _ in 0..=super::MAX_UNDO_STEPS {
+        composer.handle_key_event(KeyCode::F(7).into());
+    }
+    assert_eq!(composer.current_text(), "x");
+}
+
+#[test]
+fn consecutive_forward_deletes_are_one_undo_step() {
+    let (mut composer, _) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    composer.set_text_content("abcdef".to_owned(), Vec::new(), Vec::new());
+    composer.set_current_cursor(/*cursor*/ 1);
+    for _ in 0..3 {
+        composer.handle_key_event(KeyCode::Delete.into());
+    }
+    assert_eq!(composer.current_text(), "aef");
+    keys(&mut composer, "x");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "aef");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "abcdef");
+    composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
+    assert_eq!(composer.current_text(), "aef");
+}
+
+#[test]
+fn external_editor_result_is_one_undo_step() {
+    let (mut composer, _) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    keys(&mut composer, "draft");
+    composer.apply_external_edit("edited draft".to_owned());
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "draft");
+    composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
+    assert_eq!(composer.current_text(), "edited draft");
+}
+
+#[test]
+fn down_past_the_newest_prompt_restores_the_draft_undo_history() {
+    let (mut composer, _) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    composer
+        .history
+        .record_local_submission(HistoryEntry::new("earlier prompt".to_owned()));
+    keys(&mut composer, "draft");
+    for _ in 0.."draft".len() {
+        composer.handle_key_event(KeyCode::Backspace.into());
+    }
+    composer.handle_key_event(KeyCode::Up.into());
+    assert_eq!(composer.current_text(), "earlier prompt");
+    composer.handle_key_event(KeyCode::Down.into());
+    assert_eq!(composer.current_text(), "");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "draft");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "");
+    composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
+    assert_eq!(composer.current_text(), "draft");
+}
+
+#[test]
+fn answer_fields_undo_and_redo_typing() {
+    let (mut composer, _) = new_test_composer();
+    composer.config = ChatComposerConfig::plain_text();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    keys(&mut composer, "yes");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "");
+    composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
+    assert_eq!(composer.current_text(), "yes");
 }
