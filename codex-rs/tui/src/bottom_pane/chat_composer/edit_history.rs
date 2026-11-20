@@ -16,8 +16,8 @@ use super::ComposerDraft;
 use crate::key_hint::KeyBindingListExt;
 use crossterm::event::KeyEvent;
 
-const MAX_UNDO_STEPS: usize = 64;
-const MAX_UNDO_BYTES: usize = 8 * 1024 * 1024;
+const MAX_UNDO_STEPS: usize = 1000;
+const MAX_UNDO_BYTES: usize = 32 * 1024 * 1024;
 
 enum EditDirection {
     Undo,
