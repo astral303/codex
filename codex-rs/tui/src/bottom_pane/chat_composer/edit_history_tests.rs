@@ -12,6 +12,7 @@ use pretty_assertions::assert_eq;
 
 use super::super::super::chat_composer_history::HistoryEntry;
 use super::super::ChatComposer;
+use super::super::ChatComposerConfig;
 use super::super::ComposerDraftSnapshot;
 use super::super::InputResult;
 use super::super::LARGE_PASTE_CHAR_THRESHOLD;
@@ -1097,4 +1098,16 @@ fn down_past_the_newest_prompt_restores_the_draft_undo_history() {
     assert_eq!(composer.current_text(), "");
     composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
     assert_eq!(composer.current_text(), "draft");
+}
+
+#[test]
+fn answer_fields_undo_and_redo_typing() {
+    let (mut composer, _) = new_test_composer();
+    composer.config = ChatComposerConfig::plain_text();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    keys(&mut composer, "yes");
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "");
+    composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
+    assert_eq!(composer.current_text(), "yes");
 }
