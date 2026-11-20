@@ -1063,3 +1063,15 @@ fn consecutive_forward_deletes_are_one_undo_step() {
     composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
     assert_eq!(composer.current_text(), "aef");
 }
+
+#[test]
+fn external_editor_result_is_one_undo_step() {
+    let (mut composer, _) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    keys(&mut composer, "draft");
+    composer.apply_external_edit("edited draft".to_owned());
+    composer.handle_key_event(KeyCode::F(7).into());
+    assert_eq!(composer.current_text(), "draft");
+    composer.handle_key_event(KeyEvent::new(KeyCode::F(7), KeyModifiers::SHIFT));
+    assert_eq!(composer.current_text(), "edited draft");
+}
