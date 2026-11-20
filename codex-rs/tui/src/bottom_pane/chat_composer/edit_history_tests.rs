@@ -1031,3 +1031,16 @@ fn altgr_delete_word_is_an_undoable_deletion() {
     composer.handle_key_event(KeyCode::F(7).into());
     assert_eq!(composer.current_text(), "hello world");
 }
+
+#[test]
+fn undo_history_drops_only_steps_beyond_its_limit() {
+    let (mut composer, _) = new_test_composer();
+    composer.set_disable_paste_burst(/*disabled*/ true);
+    for _ in 0..=super::MAX_UNDO_STEPS {
+        composer.handle_paste("x".to_owned());
+    }
+    for _ in 0..=super::MAX_UNDO_STEPS {
+        composer.handle_key_event(KeyCode::F(7).into());
+    }
+    assert_eq!(composer.current_text(), "x");
+}
