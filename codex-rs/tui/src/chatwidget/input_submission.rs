@@ -1,5 +1,6 @@
 //! User-message and shell-prompt submission behavior for `ChatWidget`.
 
+use super::input_flow::UserMessageDisposition;
 use super::*;
 use codex_app_server_protocol::ImageReference;
 use codex_utils_path_uri::LegacyAppPathString;
@@ -34,6 +35,16 @@ impl UserMessageSubmissionOutcome {
             accepted: true,
             app_command: Some(app_command),
             queue_drain: QueueDrain::Stop,
+        }
+    }
+
+    pub(super) fn disposition(&self) -> UserMessageDisposition {
+        if self.app_command.is_some() {
+            UserMessageDisposition::Submitted
+        } else if self.accepted {
+            UserMessageDisposition::Queued
+        } else {
+            UserMessageDisposition::Dropped
         }
     }
 }
@@ -341,6 +352,7 @@ impl ChatWidget {
                 source,
             ),
             UserMessageSource::SafetyRecourse => (CloudSubmissionIntent::UseKnownTurn, source),
+            UserMessageSource::SentMessage => (CloudSubmissionIntent::StartOrSteer, source),
         };
         if !text.is_empty() {
             items.push(UserInput::Text {
@@ -570,7 +582,10 @@ impl ChatWidget {
         if source != UserMessageSource::SafetyRecourse && !self.submit_op(op.clone()) {
             return UserMessageSubmissionOutcome::REJECTED;
         }
-        if source != UserMessageSource::QuestionAnswer {
+        if !matches!(
+            source,
+            UserMessageSource::QuestionAnswer | UserMessageSource::SentMessage
+        ) {
             self.bottom_pane.clear_pending_questions();
         }
         self.dismiss_backend_banner_for_new_turn();

@@ -67,6 +67,8 @@ pub(super) enum UserMessageSource {
     DirectEnter,
     QuestionAnswer,
     SafetyRecourse,
+    /// A `codex send` message. Unlike a prompt, it leaves pending questions in place.
+    SentMessage,
 }
 
 /// Whether a recovered message can be submitted without risking a duplicate.
