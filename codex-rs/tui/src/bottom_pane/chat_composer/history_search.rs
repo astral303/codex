@@ -140,6 +140,8 @@ impl ChatComposer {
         self.attachments.clear_remote_image_selection();
         let original_draft = self.snapshot_draft();
         let original_edit_history = std::mem::take(&mut self.edit_history);
+        // Down past an accepted match must not restore a draft saved by an earlier Up.
+        self.history_browse_origin = None;
         let mut original_vim_state = VimPersistentState::default();
         self.draft
             .textarea
