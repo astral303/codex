@@ -10,8 +10,10 @@ use codex_terminal_detection::terminal_info;
 use crossterm::Command;
 use ratatui::crossterm::execute;
 
-// Ghostty copies the parsed notification body into a 255-byte buffer.
+// Ghostty copies the parsed notification title and body into 63-byte and 255-byte buffers.
+const GHOSTTY_TITLE_BYTES: usize = 63;
 const GHOSTTY_BODY_BYTES: usize = 255;
+const APP_NAME: &str = "Codex";
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum OscProtocol {
@@ -36,11 +38,12 @@ impl OscBackend {
         }
     }
 
-    pub fn notify(&mut self, message: &str) -> io::Result<()> {
+    pub fn notify(&mut self, session_title: Option<&str>, message: &str) -> io::Result<()> {
         execute!(
             stdout(),
             PostNotification {
                 protocol: self.protocol,
+                session_title,
                 message,
                 terminal_name: self.terminal_name,
                 dcs_passthrough: self.dcs_passthrough,
@@ -51,6 +54,7 @@ impl OscBackend {
 
 struct PostNotification<'a> {
     protocol: OscProtocol,
+    session_title: Option<&'a str>,
     message: &'a str,
     terminal_name: TerminalName,
     dcs_passthrough: bool,
@@ -58,23 +62,17 @@ struct PostNotification<'a> {
 
 impl Command for PostNotification<'_> {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
-        let mut body: String = self
-            .message
-            .chars()
-            .map(|c| match c {
-                // ASCII semicolons delimit OSC 777 fields.
-                ';' if matches!(self.protocol, OscProtocol::Osc777) => '；',
-                c if c.is_control() => ' ',
-                c => c,
-            })
-            .collect();
-        if self.terminal_name == TerminalName::Ghostty && body.len() > GHOSTTY_BODY_BYTES {
-            body.truncate(body.floor_char_boundary(GHOSTTY_BODY_BYTES - '…'.len_utf8()));
-            body.push('…');
-        }
+        let body = self.format_field(self.message, GHOSTTY_BODY_BYTES);
         let sequence = match self.protocol {
             OscProtocol::Osc9 => format!("\x1b]9;{body}\x07"),
-            OscProtocol::Osc777 => format!("\x1b]777;notify;Codex;{body}\x1b\\"),
+            OscProtocol::Osc777 => {
+                let title = match self.session_title {
+                    Some(session_title) => format!("{APP_NAME}: {session_title}"),
+                    None => APP_NAME.to_string(),
+                };
+                let title = self.format_field(&title, GHOSTTY_TITLE_BYTES);
+                format!("\x1b]777;notify;{title};{body}\x1b\\")
+            }
         };
         if self.dcs_passthrough {
             let escaped = sequence.replace('\x1b', "\x1b\x1b");
@@ -97,6 +95,25 @@ impl Command for PostNotification<'_> {
     }
 }
 
+impl PostNotification<'_> {
+    fn format_field(&self, text: &str, ghostty_field_bytes: usize) -> String {
+        let mut field: String = text
+            .chars()
+            .map(|c| match c {
+                // ASCII semicolons delimit OSC 777 fields.
+                ';' if matches!(self.protocol, OscProtocol::Osc777) => '；',
+                c if c.is_control() => ' ',
+                c => c,
+            })
+            .collect();
+        if self.terminal_name == TerminalName::Ghostty && field.len() > ghostty_field_bytes {
+            field.truncate(field.floor_char_boundary(ghostty_field_bytes - '…'.len_utf8()));
+            field.push('…');
+        }
+        field
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use codex_terminal_detection::TerminalName;
@@ -112,6 +129,7 @@ mod tests {
         let mut ansi = String::new();
         let command = PostNotification {
             protocol: OscProtocol::Osc9,
+            session_title: None,
             message: &message,
             terminal_name: TerminalName::Iterm2,
             dcs_passthrough: false,
@@ -139,6 +157,7 @@ mod tests {
             let mut ansi = String::new();
             PostNotification {
                 protocol,
+                session_title: None,
                 message: &message,
                 terminal_name: TerminalName::Ghostty,
                 dcs_passthrough: false,
@@ -154,6 +173,7 @@ mod tests {
         let mut ansi = String::new();
         let command = PostNotification {
             protocol: OscProtocol::Osc9,
+            session_title: None,
             message: "done",
             terminal_name: TerminalName::Iterm2,
             dcs_passthrough: true,
@@ -171,6 +191,7 @@ mod tests {
         let mut ansi = String::new();
         let command = PostNotification {
             protocol: OscProtocol::Osc9,
+            session_title: None,
             message: "before\x07\x1bafter",
             terminal_name: TerminalName::Iterm2,
             dcs_passthrough: true,
@@ -192,6 +213,7 @@ mod tests {
         for dcs_passthrough in [false, true] {
             let command = PostNotification {
                 protocol: OscProtocol::Osc777,
+                session_title: None,
                 message: "Approval requested: cargo test; git clean\x07\x1b\u{009c}-fd",
                 terminal_name: TerminalName::WindowsTerminal,
                 dcs_passthrough,
@@ -206,5 +228,42 @@ mod tests {
             "\u{1b}Ptmux;\u{1b}\u{1b}]777;notify;Codex;Approval requested: cargo test； git clean   -fd\u{1b}\u{1b}\\\u{1b}\\",
         ]
         "#);
+    }
+
+    #[test]
+    fn osc777_title_names_the_session() {
+        let mut ansi = String::new();
+        PostNotification {
+            protocol: OscProtocol::Osc777,
+            session_title: Some("fix; deploy\x07"),
+            message: "done",
+            terminal_name: TerminalName::WindowsTerminal,
+            dcs_passthrough: false,
+        }
+        .write_ansi(&mut ansi)
+        .expect("format OSC 777");
+
+        assert_eq!(ansi, "\x1b]777;notify;Codex: fix； deploy ;done\x1b\\");
+    }
+
+    #[test]
+    fn long_session_title_in_ghostty_fits_the_notification_title() {
+        // The next UTF-8 character crosses the cutoff for the ellipsis.
+        let session_title = format!("{}🦀{}", "a".repeat(52), "b".repeat(64));
+        let mut ansi = String::new();
+        PostNotification {
+            protocol: OscProtocol::Osc777,
+            session_title: Some(&session_title),
+            message: "done",
+            terminal_name: TerminalName::Ghostty,
+            dcs_passthrough: false,
+        }
+        .write_ansi(&mut ansi)
+        .expect("format Ghostty notification");
+
+        assert_eq!(
+            ansi,
+            format!("\x1b]777;notify;Codex: {}…;done\x1b\\", "a".repeat(52))
+        );
     }
 }
